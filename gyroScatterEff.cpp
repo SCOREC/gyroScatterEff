@@ -113,7 +113,19 @@ void gyroScatter(oh::Reals e_half,
   Kokkos::Profiling::popRegion();
 }
 
+struct version {
+  int major;
+  int minor;
+  int patch;
+  void print() const {
+    std::string s=std::to_string(major) + "." + std::to_string(minor) + "." + std::to_string(patch);
+    std::cout << "version " << s << "\n";
+  }
+};
+
 int main(int argc, char** argv) {
+  const version v{0,1,0};
+  v.print();
   if(argc != 2) {
     fprintf(stderr, "Usage: %s <field prefix>\n", argv[0]);
     exit(EXIT_FAILURE);
