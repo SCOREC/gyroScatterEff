@@ -1,17 +1,6 @@
 # gyroScatterEff
 isolated gyroScatterEff kernel
 
-## download kernel input data
-
-Note, this is ~500MB of data.
-
-```
-wget https://zenodo.org/record/7072575/files/gyroScatterData0.txt
-wget https://zenodo.org/record/7072575/files/gyroScatterData0_bmap.bin
-wget https://zenodo.org/record/7072575/files/gyroScatterData0_fmap.bin
-wget https://zenodo.org/record/7072575/files/gyroScatterData0_owners.bin
-```
-
 ## build dependencies
 
 The following commands were tested on a SCOREC workstation running RHEL7 with a
@@ -124,4 +113,57 @@ Run the build script:
 ./buildAll_turing.sh
 ```
 
+## download kernel input data
+
+The following assumes that the environment is already setup (see above) and the
+`root` directory is the same directory used to build the dependencies.
+
+Note, this is ~500MB of data.  
+
+```
+mkdir $root/run 
+cd $_
+wget https://zenodo.org/record/7072575/files/gyroScatterData0.txt
+wget https://zenodo.org/record/7072575/files/gyroScatterData0_bmap.bin
+wget https://zenodo.org/record/7072575/files/gyroScatterData0_fmap.bin
+wget https://zenodo.org/record/7072575/files/gyroScatterData0_owners.bin
+```
+
+
+## build gyroScatterEff
+
+The following assumes that the environment is already setup (see above) and the
+`root` directory is the same directory used to build the dependencies.
+
+```
+cd $root
+git clone git@github.com:SCOREC/gyroScatterEff
+cmake -S gyroScatterEff -B build-gyroScatterEff-cuda -DDATA_DIR=run/
+cmake --build build-gyroScatterEff-cuda 
+```
+
+## run 
+
+The following assumes that the environment is already setup (see above) and the
+`root` directory is the same directory used to build the dependencies.
+
+```
+./build-gyroScatterEff-cranium-cuda/gyroScatterEff run/gyroScatterData0
+```
+
+If all goes well the following output should appear:
+
+```
+version 0.1.0
+done
+```
+
+## timing data
+
+... coming soon ...
+
+we'll use kokkos profiling 
+https://github.com/kokkos/kokkos-tools/wiki/SimpleKernelTimer
+and some of the others listed here:
+https://github.com/kokkos/kokkos-tools/wiki
 
