@@ -89,7 +89,7 @@ ctest
 
 #cabana
 cd $root
-#git clone git@github.com:ECP-copa/Cabana.git cabana
+git clone git@github.com:ECP-copa/Cabana.git cabana
 [ -d $cab ] && rm -rf ${cab%%install}
 mkdir -p $cab
 cd ${cab%%install}
