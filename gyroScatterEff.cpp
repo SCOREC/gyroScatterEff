@@ -22,11 +22,11 @@ namespace {
   }
 };
 
-//void gyroScatter(Mesh& mesh, o::Reals e_half,
-//    EFieldMap& forward_map, EFieldMap& backward_map,
-//    o::Write<o::Real> eff_major, o::Write<o::Real> eff_minor,
-//    const o::LO gnrp1, const o::LO gppr) {
-//  const int ncomps = e_half.size() / (2 * mesh->nverts());
+void gyroScatter(oh::Reals e_half,
+    oh::Read<oh::LO>& forward_map, oh::Read<oh::LO>& backward_map,
+    oh::Write<oh::Real> eff_major, oh::Write<oh::Real> eff_minor,
+    const oh::LO gnrp1, const oh::LO gppr) {
+  const int ncomps = e_half.size() / (2 * numVerts);
 //  auto owners = mesh.pumipicMesh()->entOwners(0);
 //  int mesh_rank = mesh.meshRank();
 //  const o::LO nvpe = 3; //triangles
@@ -90,10 +90,10 @@ namespace {
 //    }
 //  };
 //  o::parallel_for(mesh->nverts(), efield_scatter, "gyroScatterEFF");
-//}
+}
 
 int main(int argc, char** argv) {
-  if(argc != 1) {
+  if(argc != 2) {
     fprintf(stderr, "Usage: %s <field prefix>\n", argv[0]);
     exit(EXIT_FAILURE);
   }
@@ -104,8 +104,11 @@ int main(int argc, char** argv) {
   auto bmap_d = readArrayBinary<oh::LO>(fname+"_bmap.bin");
   auto owners_d = readArrayBinary<oh::LO>(fname+"_owners.bin");
 
-  //void gyroScatter(Mesh& mesh, o::Reals e_half,
-  //    EFieldMap& forward_map, EFieldMap& backward_map,
-  //    o::Write<o::Real> eff_major, o::Write<o::Real> eff_minor,
-  //    const o::LO gnrp1, const o::LO gppr);
+  oh::Reals e_half(ehalfSize);
+  oh::Write<oh::Real> eff_major;
+  oh::Write<oh::Real> eff_minor;
+
+  gyroScatter(e_half, fmap_d, bmap_d, eff_major, eff_minor, numRings, numPtsPerRing);
+  fprintf(stderr, "done\n");
+  return 0;
 }
