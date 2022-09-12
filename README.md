@@ -17,9 +17,9 @@ wget https://zenodo.org/record/7065658/files/gyroScatterData0_owners.bin
 The following commands were tested on a SCOREC workstation running RHEL7 with a
 Nvidia Turing GPU.
 
-`cd` to a working directory that will contain all your source code and build
-directories.  That directory is referred to as `root` in the following bash
-scripts.
+`cd` to a working directory that will contain *all* your source code (including
+this directory) and build directories.  That directory is referred to as `root`
+in the following bash scripts.
 
 Create a file named `envRhel7_turing.sh` with the following contents:
 
