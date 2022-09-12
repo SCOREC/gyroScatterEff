@@ -23,26 +23,31 @@ namespace {
 };
 
 void gyroScatter(oh::Reals e_half,
-    oh::Read<oh::LO>& forward_map, oh::Read<oh::LO>& backward_map,
+    oh::LOs& forward_map, oh::LOs& backward_map,
     oh::Write<oh::Real> eff_major, oh::Write<oh::Real> eff_minor,
-    const oh::LO gnrp1, const oh::LO gppr) {
+    const oh::LO gnrp1, const oh::LO gppr,
+    oh::LOs& owners) {
   const int ncomps = e_half.size() / (2 * numVerts);
-//  auto owners = mesh.pumipicMesh()->entOwners(0);
-//  int mesh_rank = mesh.meshRank();
-//  const o::LO nvpe = 3; //triangles
-//  // handle ring = 0
-//  auto efield_scatter_ring0 = OMEGA_H_LAMBDA(const int vtx) {
-//    // index on gyro averaged electric field on ring=0
-//    const auto index = vtx * gnrp1 * ncomps;
-//    const o::LO gyroVtxIdx_f = 2 * (vtx * ncomps) + 1;
-//    const o::LO gyroVtxIdx_b = 2 * (vtx * ncomps);
-//    for (int i = 0; i < ncomps; ++i) {
-//      const o::LO ent = index + i * gnrp1;
-//      eff_major[ent] = e_half[gyroVtxIdx_f + 2 * i];
-//      eff_minor[ent] = e_half[gyroVtxIdx_b + 2 * i];
-//    }
-//  };
-//  o::parallel_for(mesh->nverts(), efield_scatter_ring0, "efield_scatter_ring0");
+  assert(ncomps == numComponents);
+  int mesh_rank = 0;
+  const oh::LO nvpe = numVertsPerElm;
+  // handle ring = 0
+  auto efield_scatter_ring0 = OMEGA_H_LAMBDA(const int vtx) {
+    // index on gyro averaged electric field on ring=0
+    const auto index = vtx * gnrp1 * ncomps;
+    const oh::LO gyroVtxIdx_f = 2 * (vtx * ncomps) + 1;
+    const oh::LO gyroVtxIdx_b = 2 * (vtx * ncomps);
+    for (int i = 0; i < ncomps; ++i) {
+      const oh::LO ent = index + i * gnrp1;
+      assert(ent<effMinorSize);
+      assert((gyroVtxIdx_f + 2 * i) < ehalfSize);
+      assert((gyroVtxIdx_b + 2 * i) < ehalfSize);
+      eff_major[ent] = e_half[gyroVtxIdx_f + 2 * i];
+      eff_minor[ent] = e_half[gyroVtxIdx_b + 2 * i];
+    }
+  };
+  oh::parallel_for(numVerts, efield_scatter_ring0, "efield_scatter_ring0");
+  assert(cudaSuccess==cudaDeviceSynchronize());
 //
 //  // handle ring > 0
 //  auto efield_scatter = OMEGA_H_LAMBDA(const int vtx) {
@@ -70,7 +75,7 @@ void gyroScatter(oh::Reals e_half,
 //              for (int i = 0; i < ncomps; ++i) {
 //                // access the major component of e_half
 //                //TODO: atomic_add probably is not needed here
-//                const o::LO gyroVtxIdx_f = 2 * (mappedVtx_f * ncomps + i) + 1;
+//                const oh::LO gyroVtxIdx_f = 2 * (mappedVtx_f * ncomps + i) + 1;
 //                Kokkos::atomic_add(&(eff_major[index + i * gnrp1]),
 //                    mappedWgt_f * e_half[gyroVtxIdx_f] / gppr);
 //              }
@@ -79,7 +84,7 @@ void gyroScatter(oh::Reals e_half,
 //              for (int i = 0; i < ncomps; ++i) {
 //                // access the minor component of e_half
 //                //TODO: atomic_add probably is not needed here
-//                const o::LO gyroVtxIdx_b = 2 * (mappedVtx_b * ncomps + i);
+//                const oh::LO gyroVtxIdx_b = 2 * (mappedVtx_b * ncomps + i);
 //                Kokkos::atomic_add(&(eff_minor[index + i * gnrp1]),
 //                    mappedWgt_b * e_half[gyroVtxIdx_b] / gppr);
 //              }
@@ -89,7 +94,7 @@ void gyroScatter(oh::Reals e_half,
 //      }
 //    }
 //  };
-//  o::parallel_for(mesh->nverts(), efield_scatter, "gyroScatterEFF");
+//  oh::parallel_for(numVerts, efield_scatter, "gyroScatterEFF");
 }
 
 int main(int argc, char** argv) {
@@ -105,10 +110,13 @@ int main(int argc, char** argv) {
   auto owners_d = readArrayBinary<oh::LO>(fname+"_owners.bin");
 
   oh::Reals e_half(ehalfSize);
-  oh::Write<oh::Real> eff_major;
-  oh::Write<oh::Real> eff_minor;
+  oh::Write<oh::Real> eff_major(effMajorSize);
+  oh::Write<oh::Real> eff_minor(effMinorSize);
 
-  gyroScatter(e_half, fmap_d, bmap_d, eff_major, eff_minor, numRings, numPtsPerRing);
+  gyroScatter(e_half, fmap_d, bmap_d,
+      eff_major, eff_minor,
+      numRings, numPtsPerRing,
+      owners_d);
   fprintf(stderr, "done\n");
   return 0;
 }
