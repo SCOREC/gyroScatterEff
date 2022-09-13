@@ -4,9 +4,7 @@
 #include <cstdlib> //exit_failure
 #include <fstream> //std::ifstream
 #include "gyroScatterData0.txt" //defines problem size constants
-#ifdef ENABLE_CABANA
 #include <Cabana_Core.hpp>
-#endif
 
 namespace oh = Omega_h;
 namespace cab = Cabana;
@@ -227,13 +225,6 @@ int main(int argc, char** argv) {
   }
   std::string fname(argv[1]);
   const auto runMode = atoi(argv[2]);
-#ifndef ENABLE_CABANA
-  if( runMode == 1 || runMode == 2 ) {
-    fprintf(stderr, "A Cabana runMode was selected but the code was compiled with Cabana disabled. "
-                    "Recompile with -DENABLE_CABANA=ON.\n");
-    exit(EXIT_FAILURE);
-  }
-#endif
   auto lib = Omega_h::Library(&argc, &argv);
 
   auto fmap_d = readArrayBinary<oh::LO>(fname+"_fmap.bin");
