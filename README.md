@@ -14,9 +14,9 @@ Create a file named `envRhel7_turing.sh` with the following contents:
 
 ```
 export root=$PWD 
-module use /opt/scorec/spack/dev/lmod/linux-rhel7-x86_64/Core
-module unuse /opt/scorec/spack/lmod/linux-rhel7-x86_64/Core
-module load gcc/7.4.0-c5aaloy cuda/10.2 cmake
+module unuse /opt/scorec/spack/lmod/linux-rhel7-x86_64/Core 
+module use /opt/scorec/spack/v0154_2/lmod/linux-rhel7-x86_64/Core 
+module load gcc/10.1.0 cmake cuda/11.4
 
 function getname() {
   name=$1
