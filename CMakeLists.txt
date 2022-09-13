@@ -7,15 +7,12 @@ find_package(Omega_h REQUIRED)
 # kokkos target, and nvcc_wrapper, provide sufficient flags.
 set_property(TARGET Omega_h::omega_h PROPERTY INTERFACE_COMPILE_OPTIONS "")
 
-option(ENABLE_CABANA "Build with Cabana" OFF)
-if(ENABLE_CABANA)
-  find_package(Cabana REQUIRED)
-  add_definitions(-DENABLE_CAB)
-endif()
+find_package(Cabana REQUIRED)
 
 set(DATA_DIR "" CACHE PATH "Path to a local copy of the gyroScatter dataset.")
 if(NOT EXISTS ${DATA_DIR})
-  message(FATAL_ERROR "DATA_DIR \"${DATA_DIR}\" is not accessible")
+  message(FATAL_ERROR "DATA_DIR \"${DATA_DIR}\" is not accessible. See README.md "
+                      "for instructions on downloading the input data.")
 endif()
 
 #Settings options for testing
@@ -26,7 +23,7 @@ option(IS_TESTING "Build for CTest" OFF)
 message(STATUS "IS_TESTING: ${IS_TESTING}")
 
 add_executable(gyroScatterEff gyroScatterEff.cpp)
+target_include_directories(gyroScatterEff PUBLIC ${DATA_DIR})
 target_link_libraries(gyroScatterEff Omega_h::omega_h)
-if(ENABLE_CABANA)
-  target_link_libraries(gyroScatterEff Cabana::cabana)
-endif()
+target_link_libraries(gyroScatterEff Cabana::cabanacore)
+target_compile_definitions(gyroScatterEff PUBLIC ENABLE_CABANA)
