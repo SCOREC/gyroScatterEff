@@ -4,6 +4,9 @@
 #include <cstdlib> //exit_failure
 #include <fstream> //std::ifstream
 #include "gyroScatterData0.txt" //defines problem size constants
+#ifdef ENABLE_CABANA
+#include <Cabana_Core.hpp>
+#endif
 
 namespace oh = Omega_h;
 
