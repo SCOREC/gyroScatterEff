@@ -219,12 +219,13 @@ struct version {
 int main(int argc, char** argv) {
   const version v{0,1,0};
   v.print();
-  if(argc != 3) {
-    fprintf(stderr, "Usage: %s <field prefix> <runMode=[0:omegah|1:cabanaPacked|2:cabanaSplit]\n", argv[0]);
+  if(argc != 4) {
+    fprintf(stderr, "Usage: %s <field prefix> <runMode=[0:omegah|1:cabanaPacked|2:cabanaSplit] <iterations>\n", argv[0]);
     exit(EXIT_FAILURE);
   }
   std::string fname(argv[1]);
   const auto runMode = atoi(argv[2]);
+  const auto numIter = atoi(argv[3]);
   auto lib = Omega_h::Library(&argc, &argv);
 
   auto fmap_d = readArrayBinary<oh::LO>(fname+"_fmap.bin");
@@ -236,26 +237,33 @@ int main(int argc, char** argv) {
   oh::Reals bweights_d(backwardWeightsSize);
 
   if(runMode==0) { //omegah
+    fprintf(stderr, "mode: omegah\n");
     oh::Write<oh::Real> eff_major(effMajorSize);
     oh::Write<oh::Real> eff_minor(effMinorSize);
 
-    gyroScatterOmegah(e_half, fmap_d, bmap_d,
-        fweights_d, bweights_d,
-        eff_major, eff_minor,
-        numRings, numPtsPerRing,
-        owners_d);
+    for(int i=0; i<numIter; i++) {
+      gyroScatterOmegah(e_half, fmap_d, bmap_d,
+          fweights_d, bweights_d,
+          eff_major, eff_minor,
+          numRings, numPtsPerRing,
+          owners_d);
+    }
   } else if(runMode==1) { //packed
+    fprintf(stderr, "mode: cabPacked\n");
     constexpr int extent = effMajorSize/numVerts;
     using DataTypes = cab::MemberTypes<double[extent],double[extent]>;
     cab::AoSoA<DataTypes, DeviceType, VectorLength> aosoa("packed", numVerts);
     auto eff_major = cab::slice<0>(aosoa);
     auto eff_minor = cab::slice<1>(aosoa);
-    gyroScatterCab(e_half, fmap_d, bmap_d,
-        fweights_d, bweights_d,
-        eff_major, eff_minor,
-        numRings, numPtsPerRing,
-        owners_d, std::string("Packed"));
+    for(int i=0; i<numIter; i++) {
+      gyroScatterCab(e_half, fmap_d, bmap_d,
+          fweights_d, bweights_d,
+          eff_major, eff_minor,
+          numRings, numPtsPerRing,
+          owners_d, std::string("Packed"));
+    }
   } else if(runMode==2) { //split
+    fprintf(stderr, "mode: cabSplit\n");
     //TODO:
     // - create two aosoa, one for each 'double[extent]'
     // - create one slice from each aosoa
