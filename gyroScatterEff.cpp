@@ -217,7 +217,7 @@ struct version {
 };
 
 int main(int argc, char** argv) {
-  const version v{0,1,0};
+  const version v{0,2,0};
   v.print();
   if(argc != 4) {
     fprintf(stderr, "Usage: %s <field prefix> <runMode=[0:omegah|1:cabanaPacked|2:cabanaSplit] <iterations>\n", argv[0]);
