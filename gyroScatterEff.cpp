@@ -53,7 +53,7 @@ void gyroScatterOmegah(oh::Reals e_half,
   int mesh_rank = 0;
   const oh::LO nvpe = numVertsPerElm;
   // handle ring = 0
-  Kokkos::Profiling::pushRegion("gyroScatterEFF_ring0");
+  Kokkos::Profiling::pushRegion("gyroScatterEFF_ring0_region");
   auto efield_scatter_ring0 = OMEGA_H_LAMBDA(const int vtx) {
     // index on gyro averaged electric field on ring=0
     const auto index = vtx * gnrp1 * ncomps;
@@ -73,7 +73,7 @@ void gyroScatterOmegah(oh::Reals e_half,
   assert(cudaSuccess==cudaDeviceSynchronize());
 
   // handle ring > 0
-  Kokkos::Profiling::pushRegion("gyroScatterEFF");
+  Kokkos::Profiling::pushRegion("gyroScatterEFF_region");
   auto efield_scatter = OMEGA_H_LAMBDA(const int vtx) {
     if (owners[vtx] == mesh_rank) {
       for(int ring=1; ring < gnrp1; ring++) {
@@ -134,7 +134,7 @@ void gyroScatterCab(oh::Reals e_half,
   int mesh_rank = 0;
   const oh::LO nvpe = numVertsPerElm;
   // handle ring = 0
-  Kokkos::Profiling::pushRegion("gyroScatterEFF_ring0_cab"+modeName);
+  Kokkos::Profiling::pushRegion("gyroScatterEFF_ring0_cab"+modeName+"_region");
   auto efield_scatter_ring0_cab = KOKKOS_LAMBDA(const int s, const int a) {
     const auto vtx = s*VectorLength+a;
     // index on gyro averaged electric field on ring=0
@@ -149,12 +149,12 @@ void gyroScatterCab(oh::Reals e_half,
     }
   };
   cab::SimdPolicy<VectorLength, ExecutionSpace> simd_policy(0, numVerts);
-  cab::simd_parallel_for(simd_policy, efield_scatter_ring0_cab, "efield_scatter_ring0_cab" );
+  cab::simd_parallel_for(simd_policy, efield_scatter_ring0_cab, "efield_scatter_ring0_cab"+modeName);
   Kokkos::Profiling::popRegion();
   assert(cudaSuccess==cudaDeviceSynchronize());
 
   // handle ring > 0
-  Kokkos::Profiling::pushRegion("gyroScatterEFF");
+  Kokkos::Profiling::pushRegion("gyroScatterEFF_cab"+modeName+"_region");
   auto efield_scatter_cab = KOKKOS_LAMBDA(const int s, const int a) {
     const auto vtx = s*VectorLength+a;
     if (owners[vtx] == mesh_rank) {
@@ -199,7 +199,7 @@ void gyroScatterCab(oh::Reals e_half,
       }
     }
   };
-  cab::simd_parallel_for(simd_policy, efield_scatter_cab, "gyroScatterEFF_cab" );
+  cab::simd_parallel_for(simd_policy, efield_scatter_cab, "gyroScatterEFF_cab"+modeName);
   Kokkos::Profiling::popRegion();
   assert(cudaSuccess==cudaDeviceSynchronize());
 }
