@@ -264,10 +264,23 @@ int main(int argc, char** argv) {
     }
   } else if(runMode==2) { //split
     fprintf(stderr, "mode: cabSplit\n");
-    //TODO:
-    // - create two aosoa, one for each 'double[extent]'
-    // - create one slice from each aosoa
-    // - pass the slices into gyroScatterCab
+    constexpr int extent = effMajorSize/numVerts;
+    using DataTypes = cab::MemberTypes<double[extent]>;
+    cab::AoSoA<DataTypes, DeviceType, VectorLength> aosoa0("split0", numVerts);
+    cab::AoSoA<DataTypes, DeviceType, VectorLength> aosoa1("split1", numVerts);
+    auto eff_major = cab::slice<0>(aosoa0);
+    auto eff_minor = cab::slice<0>(aosoa1);
+    
+    for(int i=0; i<numIter; i++) {
+      gyroScatterCab(e_half, fmap_d, bmap_d,
+		     fweights_d, bweights_d,
+		     eff_major, eff_minor,
+		     numRings, numPtsPerRing,
+		     owners_d, std::string("Split"));
+    }
+  } else {
+    fprintf(stderr, "Error: invalid run mode (must be 0, 1, or 2)\n");
+    return 0;
   }
 
   fprintf(stderr, "done\n");
