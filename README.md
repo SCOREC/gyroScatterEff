@@ -142,13 +142,24 @@ cmake -S gyroScatterEff -B build-gyroScatterEff-cuda -DDATA_DIR=run/
 cmake --build build-gyroScatterEff-cuda 
 ```
 
+## rebuild gyroScatterEff
+
+The following assumes that (1) the environment is already setup (see above) and the
+`root` directory is the same directory used to build the dependencies and (2) that `gyroScatterEff` was previously built.
+
+Use the following command to rebuild `gyroScatterEff` after making changes to its source code.  This command should be run from the `$root` directory.
+
+```
+cmake --build build-gyroScatterEff-cuda 
+```
+
 ## run 
 
 The following assumes that the environment is already setup (see above) and the
 `root` directory is the same directory used to build the dependencies.
 
 ```
-./build-gyroScatterEff-cranium-cuda/gyroScatterEff run/gyroScatterData0 0 10
+./build-gyroScatterEff-cuda/gyroScatterEff run/gyroScatterData0 0 10
 ```
 
 Where `0` specifies use of the Omega_h arrays, and `10` is the number of times to run the kernel.
@@ -158,7 +169,7 @@ Specifying `1` for the first argument will use the Cabana 'packed' AoSoA and `2`
 If all goes well the following output should appear:
 
 ```
-version 0.1.0
+version 0.2.0
 done
 ```
 
