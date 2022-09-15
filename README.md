@@ -173,12 +173,29 @@ version 0.2.0
 done
 ```
 
-## timing data
+## Timing Data
 
-... coming soon ...
-
-we'll use kokkos profiling 
-https://github.com/kokkos/kokkos-tools/wiki/SimpleKernelTimer
-and some of the others listed here:
+For timing, we'll use Kokkos SimpleKernelTimer along with some of the other tools listed here:
 https://github.com/kokkos/kokkos-tools/wiki
 
+First, clone the repository
+```
+git clone git@github.com:kokkos/kokkos-tools.git
+```
+Then, follow the instructions here to compile:
+https://github.com/kokkos/kokkos-tools/wiki/SimpleKernelTimer
+
+To run your program with timing data, run the following from your `root` directory
+```
+export KOKKOS_PROFILE_LIBRARY={PATH_TO_TOOL_DIRECTORY}/kp_kernel_timer.so
+./build-gyroScatterEff-cuda/gyroScatterEff run/gyroScatterData0 0 10
+```
+This will produce normal program output, plus the following line
+```
+KokkosP: Kernel timing written to {timing output file path}
+```
+
+To view the timing data, run the following command
+```
+{PATH_TO_TOOL_DIRECTORY}/kp_reader {timing output file path}
+```
