@@ -148,8 +148,12 @@ The following assumes that the environment is already setup (see above) and the
 `root` directory is the same directory used to build the dependencies.
 
 ```
-./build-gyroScatterEff-cranium-cuda/gyroScatterEff run/gyroScatterData0
+./build-gyroScatterEff-cranium-cuda/gyroScatterEff run/gyroScatterData0 0 10
 ```
+
+Where `0` specifies use of the Omega_h arrays, and `10` is the number of times to run the kernel.
+
+Specifying `1` for the first argument will use the Cabana 'packed' AoSoA and `2` will use the Cabana 'split' AoSoAs (still a work in progress).
 
 If all goes well the following output should appear:
 
