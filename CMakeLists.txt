@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.13.0)
 
-project(gyroScatterEff VERSION 0.2.0 LANGUAGES CXX)
+project(gyroScatterEff VERSION 0.3.0 LANGUAGES CXX)
 
 find_package(Omega_h REQUIRED)
 #Clear the omegah compilation flags that it passes to cuda.  Using the
