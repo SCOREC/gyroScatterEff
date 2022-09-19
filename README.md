@@ -42,7 +42,8 @@ Create a file named `buildAll_turing.sh` with the following contents:
 
 #kokkos
 cd $root
-git clone -b 3.4.01 git@github.com:kokkos/kokkos.git
+#tested with kokkos develop@9dff8cc
+git clone -b develop git@github.com:kokkos/kokkos.git
 mkdir -p $kk
 cd $_/..
 cmake ../kokkos \
