@@ -5,15 +5,20 @@
 #include <fstream> //std::ifstream
 #include "gyroScatterData0.txt" //defines problem size constants
 #include <Cabana_Core.hpp>
+#include <Kokkos_SIMD.hpp>
 
 namespace oh = Omega_h;
 namespace cab = Cabana;
+namespace ko = Kokkos;
+
+
 
 namespace {
   const int VectorLength = 32;
-  using MemorySpace = Kokkos::CudaSpace;
-  using ExecutionSpace = Kokkos::Cuda;
-  using DeviceType = Kokkos::Device<ExecutionSpace, MemorySpace>;
+  using MemorySpace = ko::CudaSpace;
+  using ExecutionSpace = ko::Cuda;
+  using DeviceType = ko::Device<ExecutionSpace, MemorySpace>;
+  using team_t = ko::TeamPolicy<ExecutionSpace>::member_type;
 
   template <typename T>
   oh::Read<T> readArrayBinary(std::string fname) {
@@ -53,7 +58,7 @@ void gyroScatterOmegah(oh::Reals e_half,
   int mesh_rank = 0;
   const oh::LO nvpe = numVertsPerElm;
   // handle ring = 0
-  Kokkos::Profiling::pushRegion("gyroScatterEFF_ring0_region");
+  ko::Profiling::pushRegion("gyroScatterEFF_ring0_region");
   auto efield_scatter_ring0 = OMEGA_H_LAMBDA(const int vtx) {
     // index on gyro averaged electric field on ring=0
     const auto index = vtx * gnrp1 * ncomps;
@@ -69,11 +74,11 @@ void gyroScatterOmegah(oh::Reals e_half,
     }
   };
   oh::parallel_for(numVerts, efield_scatter_ring0, "efield_scatter_ring0");
-  Kokkos::Profiling::popRegion();
+  ko::Profiling::popRegion();
   assert(cudaSuccess==cudaDeviceSynchronize());
 
   // handle ring > 0
-  Kokkos::Profiling::pushRegion("gyroScatterEFF_region");
+  ko::Profiling::pushRegion("gyroScatterEFF_region");
   auto efield_scatter = OMEGA_H_LAMBDA(const int vtx) {
     if (owners[vtx] == mesh_rank) {
       for(int ring=1; ring < gnrp1; ring++) {
@@ -100,7 +105,7 @@ void gyroScatterOmegah(oh::Reals e_half,
                 // access the major component of e_half
                 //TODO: atomic_add probably is not needed here
                 const oh::LO gyroVtxIdx_f = 2 * (mappedVtx_f * ncomps + i) + 1;
-                Kokkos::atomic_add(&(eff_major[index + i * gnrp1]),
+                ko::atomic_add(&(eff_major[index + i * gnrp1]),
                     mappedWgt_f * e_half[gyroVtxIdx_f] / gppr);
               }
             }
@@ -109,7 +114,7 @@ void gyroScatterOmegah(oh::Reals e_half,
                 // access the minor component of e_half
                 //TODO: atomic_add probably is not needed here
                 const oh::LO gyroVtxIdx_b = 2 * (mappedVtx_b * ncomps + i);
-                Kokkos::atomic_add(&(eff_minor[index + i * gnrp1]),
+                ko::atomic_add(&(eff_minor[index + i * gnrp1]),
                     mappedWgt_b * e_half[gyroVtxIdx_b] / gppr);
               }
             }
@@ -119,7 +124,7 @@ void gyroScatterOmegah(oh::Reals e_half,
     }
   };
   oh::parallel_for(numVerts, efield_scatter, "gyroScatterEFF");
-  Kokkos::Profiling::popRegion();
+  ko::Profiling::popRegion();
 }
 
 template<class EffSlice>
@@ -134,7 +139,7 @@ void gyroScatterCab(oh::Reals e_half,
   int mesh_rank = 0;
   const oh::LO nvpe = numVertsPerElm;
   // handle ring = 0
-  Kokkos::Profiling::pushRegion("gyroScatterEFF_ring0_cab"+modeName+"_region");
+  ko::Profiling::pushRegion("gyroScatterEFF_ring0_cab"+modeName+"_region");
   auto efield_scatter_ring0_cab = KOKKOS_LAMBDA(const int s, const int a) {
     const auto vtx = s*VectorLength+a;
     // index on gyro averaged electric field on ring=0
@@ -150,11 +155,11 @@ void gyroScatterCab(oh::Reals e_half,
   };
   cab::SimdPolicy<VectorLength, ExecutionSpace> simd_policy(0, numVerts);
   cab::simd_parallel_for(simd_policy, efield_scatter_ring0_cab, "efield_scatter_ring0_cab"+modeName);
-  Kokkos::Profiling::popRegion();
+  ko::Profiling::popRegion();
   assert(cudaSuccess==cudaDeviceSynchronize());
 
   // handle ring > 0
-  Kokkos::Profiling::pushRegion("gyroScatterEFF_cab"+modeName+"_region");
+  ko::Profiling::pushRegion("gyroScatterEFF_cab"+modeName+"_region");
   auto efield_scatter_cab = KOKKOS_LAMBDA(const int s, const int a) {
     const auto vtx = s*VectorLength+a;
     if (owners[vtx] == mesh_rank) {
@@ -181,7 +186,7 @@ void gyroScatterCab(oh::Reals e_half,
                 // access the major component of e_half
                 //TODO: atomic_add probably is not needed here
                 const oh::LO gyroVtxIdx_f = 2 * (mappedVtx_f * ncomps + i) + 1;
-                Kokkos::atomic_add(&eff_major.access(s, a, i * gnrp1 + ring),
+                ko::atomic_add(&eff_major.access(s, a, i * gnrp1 + ring),
                     mappedWgt_f * e_half[gyroVtxIdx_f] / gppr);
               }
             }
@@ -190,7 +195,7 @@ void gyroScatterCab(oh::Reals e_half,
                 // access the minor component of e_half
                 //TODO: atomic_add probably is not needed here
                 const oh::LO gyroVtxIdx_b = 2 * (mappedVtx_b * ncomps + i);
-                Kokkos::atomic_add(&eff_minor.access(s, a, i * gnrp1 + ring),
+                ko::atomic_add(&eff_minor.access(s, a, i * gnrp1 + ring),
                     mappedWgt_b * e_half[gyroVtxIdx_b] / gppr);
               }
             }
@@ -200,10 +205,96 @@ void gyroScatterCab(oh::Reals e_half,
     }
   };
   cab::simd_parallel_for(simd_policy, efield_scatter_cab, "gyroScatterEFF_cab"+modeName);
-  Kokkos::Profiling::popRegion();
+  ko::Profiling::popRegion();
   assert(cudaSuccess==cudaDeviceSynchronize());
 }
 
+
+template<class EffSlice>
+void gyroScatterKokkosSimd(oh::Reals e_half,
+    oh::LOs& forward_map, oh::LOs& backward_map,
+    oh::Reals& forward_weights, oh::Reals& backward_weights,
+    EffSlice& eff_major, EffSlice& eff_minor,
+    const oh::LO gnrp1, const oh::LO gppr,
+    oh::LOs& owners) {
+  const int ncomps = e_half.size() / (2 * numVerts);
+  assert(ncomps == numComponents);
+  int mesh_rank = 0;
+  const oh::LO nvpe = numVertsPerElm;
+  // handle ring = 0
+  ko::Profiling::pushRegion("gyroScatterEFF_ring0_kokkosSimd_region");
+  auto efield_scatter_ring0 = KOKKOS_LAMBDA(const team_t& team) {
+    const int s = team.league_rank();
+    const int a = team.team_rank();
+    const auto vtx = s*VectorLength+a;
+    // index on gyro averaged electric field on ring=0
+    const oh::LO gyroVtxIdx_f = 2 * (vtx * ncomps) + 1;
+    const oh::LO gyroVtxIdx_b = 2 * (vtx * ncomps);
+    for (int i = 0; i < ncomps; ++i) {
+      assert((gyroVtxIdx_f + 2 * i) < ehalfSize);
+      assert((gyroVtxIdx_b + 2 * i) < ehalfSize);
+      const oh::LO ent = i * gnrp1;
+      eff_major.access(s, a, ent) = e_half[gyroVtxIdx_f + 2 * i];
+      eff_minor.access(s, a, ent) = e_half[gyroVtxIdx_b + 2 * i];
+    }
+  };
+  ko::TeamPolicy<ExecutionSpace> team_policy(numVerts, eff_major.extent(0), VectorLength);
+  ko::parallel_for("efield_scatter_ring0_kokkosSimd", team_policy, efield_scatter_ring0);
+  ko::Profiling::popRegion();
+  assert(cudaSuccess==cudaDeviceSynchronize());
+
+  // handle ring > 0
+  ko::Profiling::pushRegion("gyroScatterEFF_kokkosSimd_region");
+  auto efield_scatter_kokkosSimd = KOKKOS_LAMBDA(const team_t& team) {
+    const int s = team.league_rank();
+    const int a = team.team_rank();
+    const auto vtx = s*VectorLength+a;
+    if (owners[vtx] == mesh_rank) {
+      for(int ring=1; ring < gnrp1; ring++) {
+        // index on gyro averaged electric field
+        for(int pt=0; pt<gppr; pt++) {
+          for(int elmVtx=0; elmVtx<nvpe; elmVtx++) {
+            const auto mappedVtx_f = mappedVertex(forward_map, vtx, ring, pt, elmVtx);
+            const auto mappedWgt_f = mappedWeight(forward_weights, vtx, ring, pt, elmVtx);
+            const auto mappedVtx_b = mappedVertex(backward_map, vtx, ring, pt, elmVtx);
+            const auto mappedWgt_b = mappedWeight(backward_weights, vtx, ring, pt, elmVtx);
+
+            // Only compute contributions of owned vertices.
+            // Field Sync will sum all contributions.
+            // This part of the operation is basically a Matrix (sparse matrix)
+            // and vector multiplication: c_j = A_ij * b_j, where vector b and
+            // c are vectors defined on the mesh vertices, with b_j, c_j the
+            // value at vertex j; while A is the gyro-average mapping matrix,
+            // A_ij represents the mapping weight from vertex i to vertex j
+            // (from field vector b to field vector c). We need to make sure
+            // the index is correct in performing this operation
+            if (mappedVtx_f >= 0) {
+              for (int i = 0; i < ncomps; ++i) {
+                // access the major component of e_half
+                //TODO: atomic_add probably is not needed here
+                const oh::LO gyroVtxIdx_f = 2 * (mappedVtx_f * ncomps + i) + 1;
+                ko::atomic_add(&eff_major.access(s, a, i * gnrp1 + ring),
+                    mappedWgt_f * e_half[gyroVtxIdx_f] / gppr);
+              }
+            }
+            if (mappedVtx_b >= 0) {
+              for (int i = 0; i < ncomps; ++i) {
+                // access the minor component of e_half
+                //TODO: atomic_add probably is not needed here
+                const oh::LO gyroVtxIdx_b = 2 * (mappedVtx_b * ncomps + i);
+                ko::atomic_add(&eff_minor.access(s, a, i * gnrp1 + ring),
+                    mappedWgt_b * e_half[gyroVtxIdx_b] / gppr);
+              }
+            }
+          }
+        }
+      }
+    }
+  };
+  ko::parallel_for("gyroScatterEFF_kokkosSimd", team_policy, efield_scatter_kokkosSimd);
+  ko::Profiling::popRegion();
+  assert(cudaSuccess==cudaDeviceSynchronize());
+}
 
 
 struct version {
@@ -278,8 +369,25 @@ int main(int argc, char** argv) {
 		     numRings, numPtsPerRing,
 		     owners_d, std::string("Split"));
     }
+  } else if(runMode==3) { //kokkos simd view
+    fprintf(stderr, "mode: kokkosSimd\n");
+    constexpr int extent = effMajorSize/numVerts;
+    using simd_t = ko::Experimental::simd< double, ko::Experimental::simd_api::cuda_warp<VectorLength> >;
+    using simd_storage_t = simd_t::storage_type;
+
+    ko::View<simd_storage_t*> eff_major("major", extent, numVerts);
+    ko::View<simd_storage_t*> eff_minor("minor", extent, numVerts);
+    /*
+    for(int i=0; i<numIter; i++) {
+      gyroScatterKokkosSimd(e_half, fmap_d, bmap_d,
+		     fweights_d, bweights_d,
+		     eff_major, eff_minor,
+		     numRings, numPtsPerRing,
+		     owners_d);
+    }
+    */
   } else {
-    fprintf(stderr, "Error: invalid run mode (must be 0, 1, or 2)\n");
+    fprintf(stderr, "Error: invalid run mode (must be 0, 1, 2, or 3)\n");
     return 0;
   }
 
