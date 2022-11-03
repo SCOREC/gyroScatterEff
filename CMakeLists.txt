@@ -8,7 +8,7 @@ find_package(Omega_h REQUIRED)
 set_property(TARGET Omega_h::omega_h PROPERTY INTERFACE_COMPILE_OPTIONS "")
 
 find_package(Cabana REQUIRED)
-find_package(meshFields REQUIRED)
+find_package(meshFields CONFIG REQUIRED)
 
 set(DATA_DIR "" CACHE PATH "Path to a local copy of the gyroScatter dataset.")
 if(NOT EXISTS ${DATA_DIR})
