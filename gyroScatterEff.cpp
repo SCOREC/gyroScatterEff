@@ -5,6 +5,7 @@
 #include <fstream> //std::ifstream
 #include "gyroScatterData0.txt" //defines problem size constants
 #include <Cabana_Core.hpp>
+#include <MeshField.hpp>
 
 namespace oh = Omega_h;
 namespace cab = Cabana;
@@ -220,7 +221,7 @@ int main(int argc, char** argv) {
   const version v{0,3,0};
   v.print();
   if(argc != 4) {
-    fprintf(stderr, "Usage: %s <field prefix> <runMode=[0:omegah|1:cabanaPacked|2:cabanaSplit] <iterations>\n", argv[0]);
+    fprintf(stderr, "Usage: %s <field prefix> <runMode=[0:omegah|1:cabanaPacked|2:cabanaSplit|3:meshFields] <iterations>\n", argv[0]);
     exit(EXIT_FAILURE);
   }
   std::string fname(argv[1]);
@@ -278,8 +279,11 @@ int main(int argc, char** argv) {
 		     numRings, numPtsPerRing,
 		     owners_d, std::string("Split"));
     }
+  } else if(runMode==3) { //meshFields
+     using Controller = SliceWrapper::CabSliceController<ExecutionSpace, MemorySpace, double>;
+     Controller c(10); //sanity check that the code builds
   } else {
-    fprintf(stderr, "Error: invalid run mode (must be 0, 1, or 2)\n");
+    fprintf(stderr, "Error: invalid run mode (must be 0, 1, 2, or 3)\n");
     return 0;
   }
 
