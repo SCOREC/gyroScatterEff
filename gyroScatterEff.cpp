@@ -206,7 +206,7 @@ void gyroScatterCab(oh::Reals e_half,
 }
 
 
-template<class EffSlice, class MeshFieldController>
+template<class MeshField, class MeshFieldController>
 void gyroScatterMeshFields(oh::Reals e_half,
     oh::LOs& forward_map, oh::LOs& backward_map,
     oh::Reals& forward_weights, oh::Reals& backward_weights,
