@@ -27,7 +27,8 @@ function getname() {
 export kk=$root/`getname kokkos`/install
 export oh=$root/`getname omegah`/install
 export cab=$root/`getname cabana`/install
-CMAKE_PREFIX_PATH=$kk:$kk/lib64/cmake:$oh:$cab:$CMAKE_PREFIX_PATH
+export mf=$root/`getname meshFields`/install
+CMAKE_PREFIX_PATH=$kk:$kk/lib64/cmake:$oh:$cab:$mf:$CMAKE_PREFIX_PATH
 
 cm=`which cmake`
 echo "cmake: $cm"
@@ -93,6 +94,14 @@ cmake ../cabana \
   -DCabana_ENABLE_Cuda=ON \
   -DCMAKE_INSTALL_PREFIX=$cab
 make -j 24 install
+
+#meshFields
+cd $root
+git clone git@github.com:SCOREC/meshFields.git
+cmake -S meshFields -B ${mf%%install} \
+  -DCMAKE_BUILD_TYPE=Debug \
+  -DCMAKE_INSTALL_PREFIX=$mf
+cmake --build ${mf%%install} -j2 --target install
 ```
 
 Make the script executable:

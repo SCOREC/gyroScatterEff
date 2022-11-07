@@ -8,6 +8,7 @@ find_package(Omega_h REQUIRED)
 set_property(TARGET Omega_h::omega_h PROPERTY INTERFACE_COMPILE_OPTIONS "")
 
 find_package(Cabana REQUIRED)
+find_package(meshFields CONFIG REQUIRED)
 
 set(DATA_DIR "" CACHE PATH "Path to a local copy of the gyroScatter dataset.")
 if(NOT EXISTS ${DATA_DIR})
@@ -26,4 +27,5 @@ add_executable(gyroScatterEff gyroScatterEff.cpp)
 target_include_directories(gyroScatterEff PUBLIC ${DATA_DIR})
 target_link_libraries(gyroScatterEff Omega_h::omega_h)
 target_link_libraries(gyroScatterEff Cabana::cabanacore)
+target_link_libraries(gyroScatterEff meshFields::meshFields)
 target_compile_definitions(gyroScatterEff PUBLIC ENABLE_CABANA)
