@@ -210,7 +210,7 @@ template<class EffSlice, class MeshFieldController>
 void gyroScatterMeshFields(oh::Reals e_half,
     oh::LOs& forward_map, oh::LOs& backward_map,
     oh::Reals& forward_weights, oh::Reals& backward_weights,
-    EffSlice& eff_major, EffSlice& eff_minor,
+    MeshField& eff_major, MeshField& eff_minor,
     MeshFieldController& mfCon,
     const oh::LO gnrp1, const oh::LO gppr,
     oh::LOs& owners, std::string modeName) {
