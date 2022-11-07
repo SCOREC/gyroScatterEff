@@ -206,6 +206,88 @@ void gyroScatterCab(oh::Reals e_half,
 }
 
 
+template<class EffSlice, class MeshFieldController>
+void gyroScatterMeshFields(oh::Reals e_half,
+    oh::LOs& forward_map, oh::LOs& backward_map,
+    oh::Reals& forward_weights, oh::Reals& backward_weights,
+    EffSlice& eff_major, EffSlice& eff_minor,
+    MeshFieldController& mfCon,
+    const oh::LO gnrp1, const oh::LO gppr,
+    oh::LOs& owners, std::string modeName) {
+  const int ncomps = e_half.size() / (2 * numVerts);
+  assert(ncomps == numComponents);
+  int mesh_rank = 0;
+  const oh::LO nvpe = numVertsPerElm;
+  // handle ring = 0
+  Kokkos::Profiling::pushRegion("gyroScatterEFF_ring0_meshField"+modeName+"_region");
+  auto efield_scatter_ring0_meshField = KOKKOS_LAMBDA(const int s, const int a) {
+    const auto vtx = s*VectorLength+a;
+    // index on gyro averaged electric field on ring=0
+    const oh::LO gyroVtxIdx_f = 2 * (vtx * ncomps) + 1;
+    const oh::LO gyroVtxIdx_b = 2 * (vtx * ncomps);
+    for (int i = 0; i < ncomps; ++i) {
+      assert((gyroVtxIdx_f + 2 * i) < ehalfSize);
+      assert((gyroVtxIdx_b + 2 * i) < ehalfSize);
+      const oh::LO ent = i * gnrp1;
+      eff_major(s, a, ent) = e_half[gyroVtxIdx_f + 2 * i];
+      eff_minor(s, a, ent) = e_half[gyroVtxIdx_b + 2 * i];
+    }
+  };
+  
+  mfCon.parallel_for(0, numVerts, efield_scatter_ring0_meshField, "efield_scatter_ring0_meshField"+modeName);
+  Kokkos::Profiling::popRegion();
+  assert(cudaSuccess==cudaDeviceSynchronize());
+
+  // handle ring > 0
+  Kokkos::Profiling::pushRegion("gyroScatterEFF_meshField"+modeName+"_region");
+  auto efield_scatter_meshField = KOKKOS_LAMBDA(const int s, const int a) {
+    const auto vtx = s*VectorLength+a;
+    if (owners[vtx] == mesh_rank) {
+      for(int ring=1; ring < gnrp1; ring++) {
+        // index on gyro averaged electric field
+        for(int pt=0; pt<gppr; pt++) {
+          for(int elmVtx=0; elmVtx<nvpe; elmVtx++) {
+            const auto mappedVtx_f = mappedVertex(forward_map, vtx, ring, pt, elmVtx);
+            const auto mappedWgt_f = mappedWeight(forward_weights, vtx, ring, pt, elmVtx);
+            const auto mappedVtx_b = mappedVertex(backward_map, vtx, ring, pt, elmVtx);
+            const auto mappedWgt_b = mappedWeight(backward_weights, vtx, ring, pt, elmVtx);
+
+            // Only compute contributions of owned vertices.
+            // Field Sync will sum all contributions.
+            // This part of the operation is basically a Matrix (sparse matrix)
+            // and vector multiplication: c_j = A_ij * b_j, where vector b and
+            // c are vectors defined on the mesh vertices, with b_j, c_j the
+            // value at vertex j; while A is the gyro-average mapping matrix,
+            // A_ij represents the mapping weight from vertex i to vertex j
+            // (from field vector b to field vector c). We need to make sure
+            // the index is correct in performing this operation
+            if (mappedVtx_f >= 0) {
+              for (int i = 0; i < ncomps; ++i) {
+                // access the major component of e_half
+                //TODO: atomic_add probably is not needed here
+                const oh::LO gyroVtxIdx_f = 2 * (mappedVtx_f * ncomps + i) + 1;
+                Kokkos::atomic_add(&eff_major(s, a, i * gnrp1 + ring),
+                    mappedWgt_f * e_half[gyroVtxIdx_f] / gppr);
+              }
+            }
+            if (mappedVtx_b >= 0) {
+              for (int i = 0; i < ncomps; ++i) {
+                // access the minor component of e_half
+                //TODO: atomic_add probably is not needed here
+                const oh::LO gyroVtxIdx_b = 2 * (mappedVtx_b * ncomps + i);
+                Kokkos::atomic_add(&eff_minor(s, a, i * gnrp1 + ring),
+                    mappedWgt_b * e_half[gyroVtxIdx_b] / gppr);
+              }
+            }
+          }
+        }
+      }
+    }
+  };
+  mfCon.parallel_for(0, numVerts, efield_scatter_meshField, "gyroScatterEFF_meshField"+modeName);
+  Kokkos::Profiling::popRegion();
+  assert(cudaSuccess==cudaDeviceSynchronize());
+}
 
 struct version {
   int major;
@@ -280,8 +362,23 @@ int main(int argc, char** argv) {
 		     owners_d, std::string("Split"));
     }
   } else if(runMode==3) { //meshFields
-     using Controller = SliceWrapper::CabSliceController<ExecutionSpace, MemorySpace, double>;
-     Controller c(10); //sanity check that the code builds
+    fprintf(stderr, "mode: meshFields\n");
+    constexpr int extent = effMajorSize/numVerts;
+    using Controller = SliceWrapper::CabSliceController<ExecutionSpace, MemorySpace, double[extent], double[extent]>;
+     Controller c(numVerts);
+     MeshField::MeshField<Controller> cabMeshField(c);
+     
+     auto eff_major = cabMeshField.makeField<0>();
+     auto eff_minor = cabMeshField.makeField<1>();
+
+     for (int i = 0; i < numIter; i++) {
+       gyroScatterMeshFields(e_half, fmap_d, bmap_d,
+			     fweights_d, bweights_d,
+			     eff_major, eff_minor,
+			     cabMeshField,
+			     numRings, numPtsPerRing,
+			     owners_d, std::string("MeshFields"));
+     }
   } else {
     fprintf(stderr, "Error: invalid run mode (must be 0, 1, 2, or 3)\n");
     return 0;
