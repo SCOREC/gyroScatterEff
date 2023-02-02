@@ -43,6 +43,7 @@ namespace {
   }
 };
 
+
 void gyroScatterOmegah(oh::Reals e_half,
     oh::LOs& forward_map, oh::LOs& backward_map,
     oh::Reals& forward_weights, oh::Reals& backward_weights,
@@ -289,6 +290,22 @@ void gyroScatterMeshFields(oh::Reals e_half,
   assert(cudaSuccess==cudaDeviceSynchronize());
 }
 
+void gyroScatterKokkos( oh::Reals e_half, oh::LOs& foward_map,
+                        oh::LOs& backward_map, oh::Reals& forward_weights,
+                        oh::Reals& backward_weights, Kokkos::View<double*>& eff_major,
+                        Kokkos::View<double*>& eff_minor, const oh::LO gnrp1, const oh::LO gppr,
+                        oh::LOs& owners, std::string& mode )
+{
+       
+
+
+
+
+}
+
+
+
+
 struct version {
   int major;
   int minor;
@@ -303,7 +320,7 @@ int main(int argc, char** argv) {
   const version v{0,3,0};
   v.print();
   if(argc != 4) {
-    fprintf(stderr, "Usage: %s <field prefix> <runMode=[0:omegah|1:cabanaPacked|2:cabanaSplit|3:meshFields] <iterations>\n", argv[0]);
+    fprintf(stderr, "Usage: %s <field prefix> <runMode=[0:omegah|1:cabanaPacked|2:cabanaSplit|3:meshFields|4:kokkosView] <iterations>\n", argv[0]);
     exit(EXIT_FAILURE);
   }
   std::string fname(argv[1]);
@@ -379,8 +396,31 @@ int main(int argc, char** argv) {
 			     numRings, numPtsPerRing,
 			     owners_d, std::string("MeshFields"));
      }
+  }
+  else if(runeMode==4){ //kokkos view
+    fprintf(stderr, "mode: kokkosView\n");
+    constexpr int extent = effMajorSize/numVerts;
+    /*  Create 2 kokkos views as eff_major and eff_minor
+     *  pass into gyroScatterKokkos
+     *
+     *  -- Map indicies
+     *
+     * */
+
+    Kokkos::View<double*> eff_major("eff_major", extent );
+    Kokkos::View<double*> eff_minor("eff_minor", extent );
+
+    for( int i = 0; i < numIter; i++ )
+    {
+        gyroScatterKokkos( e_half, fmap_d, bmap_d,
+                            fweights_d, bweights_d,
+                            eff_major, eff_minor,
+                            numRigns, numPtsPerRing,
+                            owners_d, std::string("kokkosView") );
+    }
+
   } else {
-    fprintf(stderr, "Error: invalid run mode (must be 0, 1, 2, or 3)\n");
+    fprintf(stderr, "Error: invalid run mode (must be 0, 1, 2, 3, or 4)\n");
     return 0;
   }
 
