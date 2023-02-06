@@ -290,21 +290,154 @@ void gyroScatterMeshFields(oh::Reals e_half,
   assert(cudaSuccess==cudaDeviceSynchronize());
 }
 
-void gyroScatterKokkos( oh::Reals e_half, oh::LOs& foward_map,
+void gyroScatterKokkos( oh::Reals e_half, oh::LOs& forward_map,
                         oh::LOs& backward_map, oh::Reals& forward_weights,
-                        oh::Reals& backward_weights, Kokkos::View<double*>& eff_major,
-                        Kokkos::View<double*>& eff_minor, const oh::LO gnrp1, const oh::LO gppr,
-                        oh::LOs& owners, std::string mode )
+                        oh::Reals& backward_weights, Kokkos::View<double*, MemorySpace>& eff_major,
+                        Kokkos::View<double*, MemorySpace>& eff_minor, const oh::LO gnrp1, const oh::LO gppr,
+                        oh::LOs& owners )
 {
-       
+    // TEAM POLICY
+    typedef typename Kokkos::TeamPolicy<ExecutionSpace>::member_type member_type;
+
+    const int ncomps = e_half.size() / (2 * numVerts);
+    assert(ncomps == numComponents);
+    int mesh_rank = 0;
+    const oh::LO nvpe = numVertsPerElm;
+    // handle ring = 0
+    Kokkos::Profiling::pushRegion("gyroScatterEFF_ring0_KokkosView_region");
+    auto efield_scatter_ring0 = KOKKOS_LAMBDA(member_type& team_member, const int vtx) {
+        // index on gyro averaged electric field on ring=0
+        const auto index = vtx * gnrp1 * ncomps;
+        const oh::LO gyroVtxIdx_f = 2 * (vtx * ncomps) + 1;
+        const oh::LO gyroVtxIdx_b = 2 * (vtx * ncomps);
+        Kokkos::parallel_for("TestProfile",Kokkos::TeamThreadRange(team_member, ncomps), [=] (int& i){
+            const oh::LO ent = index + i * gnrp1;
+            assert(ent<effMinorSize);
+            assert((gyroVtxIdx_f + 2 * i ) < ehalfSize);
+            assert((gyroVtxIdx_b + 2 * i ) < ehalfSize);
+            eff_major[ent] = e_half[gyroVtxIdx_f + 2 * i];
+            eff_minor[ent] = e_half[gyroVtxIdx_b + 2 * i];
+        });
+    };
+    
+/*
+ *
+ *
+ *
+auto efield_scatter_ring0 = OMEGA_H_LAMBDA(const int vtx) {
+    // index on gyro averaged electric field on ring=0
+    const auto index = vtx * gnrp1 * ncomps;
+    const oh::LO gyroVtxIdx_f = 2 * (vtx * ncomps) + 1;
+    const oh::LO gyroVtxIdx_b = 2 * (vtx * ncomps);
+    for (int i = 0; i < ncomps; ++i) {
+      const oh::LO ent = index + i * gnrp1;
+      assert(ent<effMinorSize);
+      assert((gyroVtxIdx_f + 2 * i) < ehalfSize);
+      assert((gyroVtxIdx_b + 2 * i) < ehalfSize);
+      eff_major[ent] = e_half[gyroVtxIdx_f + 2 * i];
+      eff_minor[ent] = e_half[gyroVtxIdx_b + 2 * i];
+    }
+  };
+
+    auto efield_scatter_ring0 = KOKKOS_LAMBDA( member_type& team_member, const int s, const int a ) {
+        const auto vtx = s*VectorLength+a;
+        // index on gyro averaged electric field on ring=0
+        const oh::LO gyroVtxIdx_f = 2 * (vtx * ncomps) + 1;
+        const oh::LO gyroVtxIdx_b = 2 * (vtx * ncomps);
+        Kokkos::parallel_for( "efield_scatter_ring0_inner", Kokkos::TeamThreadRange( team_member, ncomps), KOKKOS_LAMBDA( const int& i ){
+            assert((gyroVtxIdx_f + 2 * i) < ehalfSize);
+            assert((gyroVtxIdx_b + 2 * i) < ehalfSize);
+            const oh::LO ent = i * gnrp1;
+            eff_major.access(s, a, ent) = e_half[gyroVtxIdx_f + 2 * i];
+            eff_minor.access(s, a, ent) = e_half[gyroVtxIdx_b + 2 * i];
+        });
+        // gyroScatterCab
+        for (int i = 0; i < ncomps; ++i) {
+            assert((gyroVtxIdx_f + 2 * i) < ehalfSize);
+            assert((gyroVtxIdx_b + 2 * i) < ehalfSize);
+            const oh::LO ent = i * gnrp1;
+            eff_major.access(s, a, ent) = e_half[gyroVtxIdx_f + 2 * i];
+            eff_minor.access(s, a, ent) = e_half[gyroVtxIdx_b + 2 * i];
+        }
+    };
+
+// gyroScatterOmegaH
+auto efield_scatter_ring0 = OMEGA_H_LAMBDA(const int vtx) {
+    // index on gyro averaged electric field on ring=0
+    const auto index = vtx * gnrp1 * ncomps;
+    const oh::LO gyroVtxIdx_f = 2 * (vtx * ncomps) + 1;
+    const oh::LO gyroVtxIdx_b = 2 * (vtx * ncomps);
+    for (int i = 0; i < ncomps; ++i) {
+      const oh::LO ent = index + i * gnrp1;
+      assert(ent<effMinorSize);
+      assert((gyroVtxIdx_f + 2 * i) < ehalfSize);
+      assert((gyroVtxIdx_b + 2 * i) < ehalfSize);
+      eff_major[ent] = e_half[gyroVtxIdx_f + 2 * i];
+      eff_minor[ent] = e_half[gyroVtxIdx_b + 2 * i];
+    }
+  };
 
 
 
 
+*/
+    
+    //Kokkos::parallel_for( "efield_scatter_ring0_kokkosView", numVerts, efield_scatter_ring0 );
+    Kokkos::parallel_for("gyroScatterEFF_KokkosView", Kokkos::TeamPolicy<ExecutionSpace>(numVerts, Kokkos::AUTO(), VectorLength), efield_scatter_ring0 );
+
+    Kokkos::Profiling::popRegion();
+    assert(cudaSuccess==cudaDeviceSynchronize());
+    // handle ring > 0
+    Kokkos::Profiling::pushRegion( "gyroScatterEFF_KokkosView_region" );
+    auto efield_scatter = KOKKOS_LAMBDA(member_type& team_member, const int vtx) {
+        if (owners[vtx] == mesh_rank) {
+            for(int ring=1; ring < gnrp1; ring++) {
+                // index on gyro averaged electric field
+                const auto index = vtx * gnrp1 * ncomps + ring;
+                for(int pt=0; pt<gppr; pt++) {
+                    for(int elmVtx=0; elmVtx<nvpe; elmVtx++) {
+                        const auto mappedVtx_f = mappedVertex(forward_map, vtx, ring, pt, elmVtx);
+                        const auto mappedWgt_f = mappedWeight(forward_weights, vtx, ring, pt, elmVtx);
+                        const auto mappedVtx_b = mappedVertex(backward_map, vtx, ring, pt, elmVtx);
+                        const auto mappedWgt_b = mappedWeight(backward_weights, vtx, ring, pt, elmVtx);
+
+                        // Only compute contributions of owned vertices.
+                        // Field Sync will sum all contributions.
+                        // This part of the operation is basically a Matrix (sparse matrix)
+                        // and vector multiplication: c_j = A_ij * b_j, where vector b and
+                        // c are vectors defined on the mesh vertices, with b_j, c_j the
+                        // value at vertex j; while A is the gyro-average mapping matrix,
+                        // A_ij represents the mapping weight from vertex i to vertex j
+                        // (from field vector b to field vector c). We need to make sure
+                        // the index is correct in performing this operation
+                        if (mappedVtx_f >= 0) {
+                            for (int i = 0; i < ncomps; ++i) {
+                                // access the major component of e_half
+                                //TODO: atomic_add probably is not needed here
+                                const oh::LO gyroVtxIdx_f = 2 * (mappedVtx_f * ncomps + i) + 1;
+                                Kokkos::atomic_add(&(eff_major[index + i * gnrp1]),
+                                  mappedWgt_f * e_half[gyroVtxIdx_f] / gppr);
+                            }
+                        }
+                        if (mappedVtx_b >= 0) {
+                            for (int i = 0; i < ncomps; ++i) {
+                                // access the minor component of e_half
+                                //TODO: atomic_add probably is not needed here
+                                const oh::LO gyroVtxIdx_b = 2 * (mappedVtx_b * ncomps + i);
+                                Kokkos::atomic_add(&(eff_minor[index + i * gnrp1]),
+                                  mappedWgt_b * e_half[gyroVtxIdx_b] / gppr);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    };
+    Kokkos::parallel_for("gyroScatterEFF_KokkosView", numVerts, efield_scatter);
+    //Kokkos::parallel_for("gyroScatterEFF_KokkosView", Kokkos::TeamPolicy<ExecutionSpace>(numVerts,Kokkos::AUTO), efield_scatter);
+
+    Kokkos::Profiling::popRegion();
 }
-
-
-
 
 struct version {
   int major;
@@ -399,16 +532,12 @@ int main(int argc, char** argv) {
   }
   else if(runMode==4){ //kokkos view
     fprintf(stderr, "mode: kokkosView\n");
-    constexpr int extent = effMajorSize/numVerts;
     /*  Create 2 kokkos views as eff_major and eff_minor
      *  pass into gyroScatterKokkos
-     *
-     *  -- Map indicies
-     *
      * */
 
-    Kokkos::View<double*> eff_major("eff_major", extent );
-    Kokkos::View<double*> eff_minor("eff_minor", extent );
+    Kokkos::View<double*, MemorySpace> eff_major( "eff_major", effMajorSize );
+    Kokkos::View<double*, MemorySpace> eff_minor( "eff_major", effMinorSize );
 
     for( int i = 0; i < numIter; i++ )
     {
@@ -416,7 +545,7 @@ int main(int argc, char** argv) {
                             fweights_d, bweights_d,
                             eff_major, eff_minor,
                             numRings, numPtsPerRing,
-                            owners_d, std::string("kokkosView") );
+                            owners_d );
     }
 
   } else {
