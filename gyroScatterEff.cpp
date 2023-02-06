@@ -290,6 +290,16 @@ void gyroScatterMeshFields(oh::Reals e_half,
   assert(cudaSuccess==cudaDeviceSynchronize());
 }
 
+
+/*
+gyroScatterKokkos( e_half, fmap_d, bmap_d,
+                            fweights_d, bweights_d,
+                            eff_major, eff_minor,
+                            numRings, numPtsPerRing,
+                            owners_d );
+
+*/
+/* ==========DEBUG START==========
 void gyroScatterKokkos( oh::Reals e_half, oh::LOs& forward_map,
                         oh::LOs& backward_map, oh::Reals& forward_weights,
                         oh::Reals& backward_weights, Kokkos::View<double*, MemorySpace>& eff_major,
@@ -297,7 +307,20 @@ void gyroScatterKokkos( oh::Reals e_half, oh::LOs& forward_map,
                         oh::LOs& owners )
 {
     // TEAM POLICY
-    typedef typename Kokkos::TeamPolicy<ExecutionSpace>::member_type member_type;
+
+    Kokkos::TeamPolicy<> policy(numVerts, Kokkos::AUTO());
+    typedef typename Kokkos::TeamPolicy<>::member_type member_type;
+    
+    struct functor
+    {
+    
+        KOKKOS_INLINE_FUNCTION
+        void operator() ( member_type team_member )
+        {
+            
+        }
+    
+    };
 
     const int ncomps = e_half.size() / (2 * numVerts);
     assert(ncomps == numComponents);
@@ -305,91 +328,32 @@ void gyroScatterKokkos( oh::Reals e_half, oh::LOs& forward_map,
     const oh::LO nvpe = numVertsPerElm;
     // handle ring = 0
     Kokkos::Profiling::pushRegion("gyroScatterEFF_ring0_KokkosView_region");
-    auto efield_scatter_ring0 = KOKKOS_LAMBDA(member_type& team_member, const int vtx) {
+    auto efield_scatter_ring0 = KOKKOS_LAMBDA(const int vtx) {
         // index on gyro averaged electric field on ring=0
         const auto index = vtx * gnrp1 * ncomps;
         const oh::LO gyroVtxIdx_f = 2 * (vtx * ncomps) + 1;
         const oh::LO gyroVtxIdx_b = 2 * (vtx * ncomps);
-        Kokkos::parallel_for("TestProfile",Kokkos::TeamThreadRange(team_member, ncomps), [=] (int& i){
+        //Kokkos::parallel_for(Kokkos::TeamThreadRange(team_member, ncomps), [&] (const int& i){
+        for (int i = 0; i < ncomps; ++i){
             const oh::LO ent = index + i * gnrp1;
             assert(ent<effMinorSize);
             assert((gyroVtxIdx_f + 2 * i ) < ehalfSize);
             assert((gyroVtxIdx_b + 2 * i ) < ehalfSize);
             eff_major[ent] = e_half[gyroVtxIdx_f + 2 * i];
             eff_minor[ent] = e_half[gyroVtxIdx_b + 2 * i];
-        });
-    };
-    
-/*
- *
- *
- *
-auto efield_scatter_ring0 = OMEGA_H_LAMBDA(const int vtx) {
-    // index on gyro averaged electric field on ring=0
-    const auto index = vtx * gnrp1 * ncomps;
-    const oh::LO gyroVtxIdx_f = 2 * (vtx * ncomps) + 1;
-    const oh::LO gyroVtxIdx_b = 2 * (vtx * ncomps);
-    for (int i = 0; i < ncomps; ++i) {
-      const oh::LO ent = index + i * gnrp1;
-      assert(ent<effMinorSize);
-      assert((gyroVtxIdx_f + 2 * i) < ehalfSize);
-      assert((gyroVtxIdx_b + 2 * i) < ehalfSize);
-      eff_major[ent] = e_half[gyroVtxIdx_f + 2 * i];
-      eff_minor[ent] = e_half[gyroVtxIdx_b + 2 * i];
-    }
-  };
-
-    auto efield_scatter_ring0 = KOKKOS_LAMBDA( member_type& team_member, const int s, const int a ) {
-        const auto vtx = s*VectorLength+a;
-        // index on gyro averaged electric field on ring=0
-        const oh::LO gyroVtxIdx_f = 2 * (vtx * ncomps) + 1;
-        const oh::LO gyroVtxIdx_b = 2 * (vtx * ncomps);
-        Kokkos::parallel_for( "efield_scatter_ring0_inner", Kokkos::TeamThreadRange( team_member, ncomps), KOKKOS_LAMBDA( const int& i ){
-            assert((gyroVtxIdx_f + 2 * i) < ehalfSize);
-            assert((gyroVtxIdx_b + 2 * i) < ehalfSize);
-            const oh::LO ent = i * gnrp1;
-            eff_major.access(s, a, ent) = e_half[gyroVtxIdx_f + 2 * i];
-            eff_minor.access(s, a, ent) = e_half[gyroVtxIdx_b + 2 * i];
-        });
-        // gyroScatterCab
-        for (int i = 0; i < ncomps; ++i) {
-            assert((gyroVtxIdx_f + 2 * i) < ehalfSize);
-            assert((gyroVtxIdx_b + 2 * i) < ehalfSize);
-            const oh::LO ent = i * gnrp1;
-            eff_major.access(s, a, ent) = e_half[gyroVtxIdx_f + 2 * i];
-            eff_minor.access(s, a, ent) = e_half[gyroVtxIdx_b + 2 * i];
         }
     };
-
-// gyroScatterOmegaH
-auto efield_scatter_ring0 = OMEGA_H_LAMBDA(const int vtx) {
-    // index on gyro averaged electric field on ring=0
-    const auto index = vtx * gnrp1 * ncomps;
-    const oh::LO gyroVtxIdx_f = 2 * (vtx * ncomps) + 1;
-    const oh::LO gyroVtxIdx_b = 2 * (vtx * ncomps);
-    for (int i = 0; i < ncomps; ++i) {
-      const oh::LO ent = index + i * gnrp1;
-      assert(ent<effMinorSize);
-      assert((gyroVtxIdx_f + 2 * i) < ehalfSize);
-      assert((gyroVtxIdx_b + 2 * i) < ehalfSize);
-      eff_major[ent] = e_half[gyroVtxIdx_f + 2 * i];
-      eff_minor[ent] = e_half[gyroVtxIdx_b + 2 * i];
-    }
-  };
-
-
-
-
-*/
     
+    // 
+
     //Kokkos::parallel_for( "efield_scatter_ring0_kokkosView", numVerts, efield_scatter_ring0 );
-    Kokkos::parallel_for("gyroScatterEFF_KokkosView", Kokkos::TeamPolicy<ExecutionSpace>(numVerts, Kokkos::AUTO(), VectorLength), efield_scatter_ring0 );
+    Kokkos::parallel_for("gyroScatterEFF_KokkosView", policy, efield_scatter_ring0 );
 
     Kokkos::Profiling::popRegion();
     assert(cudaSuccess==cudaDeviceSynchronize());
     // handle ring > 0
     Kokkos::Profiling::pushRegion( "gyroScatterEFF_KokkosView_region" );
-    auto efield_scatter = KOKKOS_LAMBDA(member_type& team_member, const int vtx) {
+    auto efield_scatter = KOKKOS_LAMBDA(const int vtx) {
         if (owners[vtx] == mesh_rank) {
             for(int ring=1; ring < gnrp1; ring++) {
                 // index on gyro averaged electric field
@@ -438,6 +402,7 @@ auto efield_scatter_ring0 = OMEGA_H_LAMBDA(const int vtx) {
 
     Kokkos::Profiling::popRegion();
 }
+==========DEBUG END==========*/
 
 struct version {
   int major;
@@ -535,10 +500,66 @@ int main(int argc, char** argv) {
     /*  Create 2 kokkos views as eff_major and eff_minor
      *  pass into gyroScatterKokkos
      * */
+    //constexpr int extent = effMajorSize/numVerts;
 
     Kokkos::View<double*, MemorySpace> eff_major( "eff_major", effMajorSize );
     Kokkos::View<double*, MemorySpace> eff_minor( "eff_major", effMinorSize );
+    
+    // BEGIN TEST 
+    int league_size = 5;
+    int team_size = 5;
+    int loops = team_size;
+    typedef typename Kokkos::TeamPolicy<>::member_type member_type;
+    
+    Kokkos::View<int**,MemorySpace> test_view("test_view", league_size, team_size );
 
+    
+    Kokkos::parallel_for( Kokkos::TeamPolicy<>(league_size,  team_size), 
+            KOKKOS_LAMBDA( const member_type& thread )
+            {
+                
+                int* league = new int;
+                Kokkos::single( Kokkos::PerThread( thread ),[&] () 
+                    {
+                        *league = thread.league_rank();
+                    });
+                Kokkos::single( Kokkos::PerTeam( thread ), [&] ()
+                    {
+                        test_view(*league,thread.team_rank()) = 0;
+                    });
+                Kokkos::parallel_for(Kokkos::TeamThreadRange( thread, loops ), 
+                    [=] (const int& i)
+                    {
+                        const int team = thread.team_rank();
+                        test_view(*league, team) += i;
+                        printf("league: %d, team: %d, loop:%d\n", *league, team, i );
+                    });
+                
+            });
+    // views are not accessable in host space, must be accessed in parallel dispatch...
+    Kokkos::parallel_for( league_size, KOKKOS_LAMBDA( const int i)
+    {
+        for( int j = 0; j < team_size; j++ )
+        {
+            printf("test_view(%d,%d) = %d\n", i,j,test_view(i,j));
+        }
+    });
+
+    // If loops = team_size -> loops get distributed directly into the team number...
+    // If loops < team_size -> loops get distributed directly into team number
+    //      up to the loop amount...
+    // If loops > team_size -> overlap, if threads = 5, and loops = 10,
+    //      the 1st thread will take over the 6th loop and continue similarly.
+    //
+    //  From documentation: 
+    //      all values are taken by value and NOT by refernece. Kokkos treats
+    //      every value inside a nested parallel_for as const so invalid access
+    //      will result in const compiler error.
+    //
+    //
+    // END TEST
+    
+    /*
     for( int i = 0; i < numIter; i++ )
     {
         gyroScatterKokkos( e_half, fmap_d, bmap_d,
@@ -547,6 +568,7 @@ int main(int argc, char** argv) {
                             numRings, numPtsPerRing,
                             owners_d );
     }
+    */
 
   } else {
     fprintf(stderr, "Error: invalid run mode (must be 0, 1, 2, 3, or 4)\n");
