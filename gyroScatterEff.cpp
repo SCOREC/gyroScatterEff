@@ -503,55 +503,6 @@ int main(int argc, char** argv) {
     Kokkos::View<double*, MemorySpace> eff_major( "eff_major", effMajorSize );
     Kokkos::View<double*, MemorySpace> eff_minor( "eff_major", effMinorSize );
       
-    /*
-    // BEGIN TEST 
-    printf("numRings:%d\n", numRings);
-    printf("numPtsPerRing:%d\n", numPtsPerRing);
-
-    int league_size = 5;
-    int team_size = 5;
-    int loops = team_size;
-    typedef typename Kokkos::TeamPolicy<>::member_type member_type;
-    
-    Kokkos::View<int**> test_view("test_view", league_size, team_size );
-        
-    Kokkos::parallel_for( Kokkos::TeamPolicy<>(league_size,  team_size), 
-      KOKKOS_LAMBDA( const member_type& thread ) {
-        int league = thread.league_rank();
-        Kokkos::single( Kokkos::PerTeam( thread ), [&] () {
-          test_view(league,thread.team_rank()) = 0;
-        });
-
-        Kokkos::parallel_for(Kokkos::TeamThreadRange( thread, loops ), 
-        [=] (const int& i) {
-          const int team = thread.team_rank();
-          test_view(league, team) += i;
-          printf("league: %d, team: %d, loop:%d\n", league, team, i );
-         });
-                
-    });
-    // views are not accessable in host space, must be accessed in parallel dispatch...
-    Kokkos::parallel_for( league_size, KOKKOS_LAMBDA( const int& i) {
-      for( int j = 0; j < team_size; j++ ) {
-        printf("test_view(%d,%d) = %d\n", i,j,test_view(i,j));
-      }
-    });
-
-    // If loops = team_size -> loops get distributed directly into the team number...
-    // If loops < team_size -> loops get distributed directly into team number
-    //      up to the loop amount...
-    // If loops > team_size -> overlap, if threads = 5, and loops = 10,
-    //      the 1st thread will take over the 6th loop and continue similarly.
-    //
-    //  From documentation: 
-    //      all values are taken by value and NOT by refernece. Kokkos treats
-    //      every value inside a nested parallel_for as const so invalid access
-    //      will result in const compiler error.
-    //
-    //
-    // END TEST
-    */
-    
     for( int i = 0; i < numIter; i++ )
     {
         gyroScatterKokkos( e_half, fmap_d, bmap_d,
