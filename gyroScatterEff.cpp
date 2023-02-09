@@ -7,6 +7,10 @@
 #include <Cabana_Core.hpp>
 #include <MeshField.hpp>
 
+// TODO:
+#include <cmath>
+
+
 namespace oh = Omega_h;
 namespace cab = Cabana;
 
@@ -43,7 +47,6 @@ namespace {
   }
 };
 
-
 void gyroScatterOmegah(oh::Reals e_half,
     oh::LOs& forward_map, oh::LOs& backward_map,
     oh::Reals& forward_weights, oh::Reals& backward_weights,
@@ -73,7 +76,47 @@ void gyroScatterOmegah(oh::Reals e_half,
   oh::parallel_for(numVerts, efield_scatter_ring0, "efield_scatter_ring0");
   Kokkos::Profiling::popRegion();
   assert(cudaSuccess==cudaDeviceSynchronize());
+  
+/*
+  LAYOUT NOTES:
 
+  vtx varies: [0,numVerts)
+  ring varies: [1,gnrp1)
+  gnrp1 -> const
+  ncomps -> const
+    
+  index = (vtx * gnrp1 * ncomps ) + ring
+    
+  ACCESS:
+    i varies: [0,ncomps)
+    eff_major[index + (i*gnrp1)]
+
+eff_major:
+    +-------------+-------------+
+    |   Vertex    |   Vertex    | Iterate first
+    +------+------+------+------+
+    | comp | comp | comp | comp | Iterate third
+    +---+--+--+---+---+--+--+---+
+    |r0 |r1|r0|r1 |r0 |r1|r0|r1 | Iterate second
+    +---------------------------+
+      ^  ^     
+      |  |________ 
+      |           |
+    +-----------+-----------+
+    |   ring0   |   ring1   |
+    +-----------+-----------+
+
+    If we want to bring componenets to an outer loop;
+      conditional based on mappedVertex() and mappedWeight()
+      which require vtx, ring, pt, elmvtx.
+      -> pt and elmvtx are easy to extract 'cause they're not reliant on anything
+      -> problem is swapping ring and component loops to get good coalescing...
+
+      -> possible solutions:
+          extract vtx into two variables?
+      
+
+*/
   // handle ring > 0
   Kokkos::Profiling::pushRegion("gyroScatterEFF_region");
   auto efield_scatter = OMEGA_H_LAMBDA(const int vtx) {
@@ -111,6 +154,7 @@ void gyroScatterOmegah(oh::Reals e_half,
                 // access the minor component of e_half
                 //TODO: atomic_add probably is not needed here
                 const oh::LO gyroVtxIdx_b = 2 * (mappedVtx_b * ncomps + i);
+                // TODO:atomic increment -> sanity check (compare to kokkos version)
                 Kokkos::atomic_add(&(eff_minor[index + i * gnrp1]),
                     mappedWgt_b * e_half[gyroVtxIdx_b] / gppr);
               }
@@ -333,7 +377,7 @@ void gyroScatterKokkos( oh::Reals e_half, oh::LOs& forward_map,
     const oh::LO gyroVtxIdx_b = 2*(league*ncomps);
   
     Kokkos::parallel_for(Kokkos::TeamThreadRange( thread, ncomps ), 
-      [&] (const int& i) {
+      [=] (const int& i) {
         const oh::LO ent = index + i * gnrp1;
         assert(ent<effMinorSize);
         assert((gyroVtxIdx_f + 2 * i) < ehalfSize);
@@ -343,62 +387,87 @@ void gyroScatterKokkos( oh::Reals e_half, oh::LOs& forward_map,
     });
   };
   
-  Kokkos::parallel_for("gyroScatterEFF_ring0_KokkosView", Kokkos::TeamPolicy<>(numVerts, Kokkos::AUTO()), efield_scatter_ring0_kokkos );
+  Kokkos::parallel_for("gyroScatterEFF_ring0_KokkosView", Kokkos::TeamPolicy<>(numVerts, ncomps), efield_scatter_ring0_kokkos );
 
   Kokkos::Profiling::popRegion();
   assert(cudaSuccess==cudaDeviceSynchronize());
+  
 
+/*
+  New layout idea:
+  +-------+-------+-------+-------+-------+-------+
+  | ncomps| ncomps| ncomps| ncomps| ncomps| ncomps|
+  +---+---+---+---+---+---+---+---+---+---+---+---+
+  |r0 | r0|r1 | r1|r2 | r2|r3 | r3|r4 | r4|r5 | r5|
+  +---+---+---+---+---+---+---+---+---+---+---+---+
+  -> number of rings per component is ncomps.
+  -> number of actual componenets -> dont need to know.
+  -> vectorize on number of rings
+
+  -- after testing, this new  memory layout is garbage.
+
+  -- Current memory layout promotes coalescing.
+
+*/
   // handle ring > 0
   Kokkos::Profiling::pushRegion("gyroScatterEFF_region");
-  auto efield_scatter_kokkos = KOKKOS_LAMBDA( const member_type& thread ) {
-    const int vtx = thread.league_rank();
-    if (owners[vtx] == mesh_rank) {
-      // TODO: Possibly use parallel_recude to add into eff_major/minor
-      Kokkos::parallel_for( Kokkos::TeamThreadRange( thread, gnrp1-1 ),
-      [=] ( int& theta ) {
-        const int ring = theta + 1;
-        // index on gyro averaged electric field
-        const auto index = vtx * gnrp1 * ncomps + ring;
-        for(int pt=0; pt<gppr; pt++) {
-          for(int elmVtx=0; elmVtx<nvpe; elmVtx++) {
-            const auto mappedVtx_f = mappedVertex(forward_map, vtx, ring, pt, elmVtx);
-            const auto mappedWgt_f = mappedWeight(forward_weights, vtx, ring, pt, elmVtx);
-            const auto mappedVtx_b = mappedVertex(backward_map, vtx, ring, pt, elmVtx);
-            const auto mappedWgt_b = mappedWeight(backward_weights, vtx, ring, pt, elmVtx);
+  const int stride = effMajorSize/numVerts; // TODO: may not be accurate...
+  assert( stride == numComponents*numRings);
 
-            // Only compute contributions of owned vertices.
-            // Field Sync will sum all contributions.
-            // This part of the operation is basically a Matrix (sparse matrix)
-            // and vector multiplication: c_j = A_ij * b_j, where vector b and
-            // c are vectors defined on the mesh vertices, with b_j, c_j the
-            // value at vertex j; while A is the gyro-average mapping matrix,
-            // A_ij represents the mapping weight from vertex i to vertex j
-            // (from field vector b to field vector c). We need to make sure
-            // the index is correct in performing this operation
-            if (mappedVtx_f >= 0) {
-              for (int i = 0; i < ncomps; ++i) {
-                // access the major component of e_half
-                //TODO: atomic_add probably is not needed here
-                const oh::LO gyroVtxIdx_f = 2 * (mappedVtx_f * ncomps + i) + 1;
-                Kokkos::atomic_add(&(eff_major(index + i * gnrp1)),
-                    mappedWgt_f * e_half[gyroVtxIdx_f] / gppr);
-              }
-            }
-            if (mappedVtx_b >= 0) {
-              for (int i = 0; i < ncomps; ++i) {
-                // access the minor component of e_half
-                //TODO: atomic_add probably is not needed here
-                const oh::LO gyroVtxIdx_b = 2 * (mappedVtx_b * ncomps + i);
-                Kokkos::atomic_add(&(eff_minor(index + i * gnrp1)),
-                    mappedWgt_b * e_half[gyroVtxIdx_b] / gppr);
+
+  auto efield_scatter_kokkos = KOKKOS_LAMBDA( const member_type& thread ) {
+    // THIS WHOLE LOOP IS INCORRECT; CURRENTLY TESTIN
+    Kokkos::parallel_for( Kokkos::TeamThreadRange( thread, VectorLength ), 
+    [&] ( const int& a ) {
+        const int s = thread.league_rank();
+        const int vtx = s*numVerts+a; 
+        if (owners[vtx] == mesh_rank) {
+          for(int ring=1; ring < gnrp1; ring++) {
+            // index on gyro averaged electric field
+            for(int pt=0; pt<gppr; pt++) {
+              for(int elmVtx=0; elmVtx<nvpe; elmVtx++) {
+                const auto mappedVtx_f = mappedVertex(forward_map, vtx, ring, pt, elmVtx);
+                const auto mappedWgt_f = mappedWeight(forward_weights, vtx, ring, pt, elmVtx);
+                const auto mappedVtx_b = mappedVertex(backward_map, vtx, ring, pt, elmVtx);
+                const auto mappedWgt_b = mappedWeight(backward_weights, vtx, ring, pt, elmVtx);
+
+                // Only compute contributions of owned vertices.
+                // Field Sync will sum all contributions.
+                // This part of the operation is basically a Matrix (sparse matrix)
+                // and vector multiplication: c_j = A_ij * b_j, where vector b and
+                // c are vectors defined on the mesh vertices, with b_j, c_j the
+                // value at vertex j; while A is the gyro-average mapping matrix,
+                // A_ij represents the mapping weight from vertex i to vertex j
+                // (from field vector b to field vector c). We need to make sure
+                // the index is correct in performing this operation
+                if (mappedVtx_f >= 0) {
+                  for (int i = 0; i < ncomps; ++i) {
+                    // access the major component of e_half
+                    //TODO: atomic_add probably is not needed here
+                    const oh::LO gyroVtxIdx_f = 2 * (mappedVtx_f * ncomps + i) + 1;
+                    Kokkos::atomic_add(&eff_major(stride * s + a + VectorLength * (i * gnrp1 + ring)),
+                        mappedWgt_f * e_half[gyroVtxIdx_f] / gppr);
+                  }
+                }
+                if (mappedVtx_b >= 0) {
+                  for (int i = 0; i < ncomps; ++i) {
+                    // access the minor component of e_half
+                    //TODO: atomic_add probably is not needed here
+                    const oh::LO gyroVtxIdx_b = 2 * (mappedVtx_b * ncomps + i);
+                    Kokkos::atomic_add(&eff_minor(stride * s + a + VectorLength * (i * gnrp1 + ring)),
+                        mappedWgt_b * e_half[gyroVtxIdx_b] / gppr);
+                  }
+                }
               }
             }
           }
         }
-      });
-    }
+
+    });
   };
+  
   Kokkos::parallel_for("gyroScatterEFF_KokkosView",Kokkos::TeamPolicy<>(numVerts, Kokkos::AUTO()), efield_scatter_kokkos );
+  //Kokkos::parallel_for("gyroScatterEFF_KokkosView", numVerts, efield_scatter_kokkos );
   Kokkos::Profiling::popRegion();
 }
 
@@ -452,6 +521,7 @@ int main(int argc, char** argv) {
     cab::AoSoA<DataTypes, DeviceType, VectorLength> aosoa("packed", numVerts);
     auto eff_major = cab::slice<0>(aosoa);
     auto eff_minor = cab::slice<1>(aosoa);
+
     for(int i=0; i<numIter; i++) {
       gyroScatterCab(e_half, fmap_d, bmap_d,
           fweights_d, bweights_d,
@@ -498,10 +568,45 @@ int main(int argc, char** argv) {
     fprintf(stderr, "mode: kokkosView\n");
     /*  Create 2 kokkos views as eff_major and eff_minor
      *  pass into gyroScatterKokkos
-     * */
+     *  +---------------------------------------------+
+     *  | Vector01      | Vector02      | Vector03    | ...
+     *  +---------------+-------------+---------------+
+     *  | vtx01 | vtx02 | vtx03 | vtx04 | vtx05 | vtx06 | ...
+     *  +-------+-------+-------+-------+-------+-------+
+     *  |c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c| ...
+     *  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     *   ^ ^
+     *   | |__________
+     *   |            |
+     *  +-----------------------------+
+     *  |Component|Component|Component| ...
+     *  +---------+---------+---------+
+     *  | r0 | r1 | r0 | r1 | r0 | r1 | ...
+     *  +----+----+----+----+----+----+
+     *  
+     *
+     *
+     *  -- fit as many 'extents' inside the vector size.
+     *  -- generate appropriate ranges for vector loop variables.
+     *
+     *  cabana: eff_major.access(s,a,i*gnrp1+ring)
+     *  -> eff_major[ (stride * s) + a + (VectorLength * (i*gnrp1+ring)) ];
+     *
+     *  we know that vtx = s*VectorLength+a
+     *  and vtx must vary between [0,numVerts)
+     *    The trick is 
+     * 
+     */
     
-    Kokkos::View<double*, MemorySpace> eff_major( "eff_major", effMajorSize );
-    Kokkos::View<double*, MemorySpace> eff_minor( "eff_major", effMinorSize );
+    constexpr int extent = effMajorSize/numVerts;
+    auto majorNumSOA = std::floor( effMajorSize/VectorLength );
+    auto minorNumSOA = std::floor( effMinorSize/VectorLength );
+
+    if( effMajorSize % VectorLength > 0 ) majorNumSOA++;
+    if( effMinorSize % VectorLength > 0 ) minorNumSOA++;
+    
+    Kokkos::View<double*, MemorySpace> eff_major( "eff_major", majorNumSOA*extent*VectorLength );
+    Kokkos::View<double*, MemorySpace> eff_minor( "eff_major", minorNumSOA*extent*VectorLength );
       
     for( int i = 0; i < numIter; i++ )
     {
