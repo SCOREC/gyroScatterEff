@@ -76,47 +76,7 @@ void gyroScatterOmegah(oh::Reals e_half,
   oh::parallel_for(numVerts, efield_scatter_ring0, "efield_scatter_ring0");
   Kokkos::Profiling::popRegion();
   assert(cudaSuccess==cudaDeviceSynchronize());
-  
-/*
-  LAYOUT NOTES:
 
-  vtx varies: [0,numVerts)
-  ring varies: [1,gnrp1)
-  gnrp1 -> const
-  ncomps -> const
-    
-  index = (vtx * gnrp1 * ncomps ) + ring
-    
-  ACCESS:
-    i varies: [0,ncomps)
-    eff_major[index + (i*gnrp1)]
-
-eff_major:
-    +-------------+-------------+
-    |   Vertex    |   Vertex    | Iterate first
-    +------+------+------+------+
-    | comp | comp | comp | comp | Iterate third
-    +---+--+--+---+---+--+--+---+
-    |r0 |r1|r0|r1 |r0 |r1|r0|r1 | Iterate second
-    +---------------------------+
-      ^  ^     
-      |  |________ 
-      |           |
-    +-----------+-----------+
-    |   ring0   |   ring1   |
-    +-----------+-----------+
-
-    If we want to bring componenets to an outer loop;
-      conditional based on mappedVertex() and mappedWeight()
-      which require vtx, ring, pt, elmvtx.
-      -> pt and elmvtx are easy to extract 'cause they're not reliant on anything
-      -> problem is swapping ring and component loops to get good coalescing...
-
-      -> possible solutions:
-          extract vtx into two variables?
-      
-
-*/
   // handle ring > 0
   Kokkos::Profiling::pushRegion("gyroScatterEFF_region");
   auto efield_scatter = OMEGA_H_LAMBDA(const int vtx) {
@@ -392,8 +352,7 @@ void gyroScatterKokkos( oh::Reals e_half, oh::LOs& forward_map,
     const int s = thread.league_rank();
     bool isLastSOA = ( numMajorSOA-1 == s );
     int teamSize = isLastSOA ? numTuplesInLastSOA : VectorLength;
-
-    // THIS WHOLE LOOP IS INCORRECT; CURRENTLY TESTIN
+    
     Kokkos::parallel_for( Kokkos::TeamThreadRange( thread, teamSize ), 
     [&] ( const int& a ) {
         const int vtx = s*VectorLength+a; 
@@ -443,7 +402,6 @@ void gyroScatterKokkos( oh::Reals e_half, oh::LOs& forward_map,
   };
   
   Kokkos::parallel_for("gyroScatterEFF_KokkosView",Kokkos::TeamPolicy<>(numMajorSOA, VectorLength), efield_scatter_kokkos );
-  //Kokkos::parallel_for("gyroScatterEFF_KokkosView", numVerts, efield_scatter_kokkos );
   Kokkos::Profiling::popRegion();
 }
 
