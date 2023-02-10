@@ -316,7 +316,7 @@ void gyroScatterKokkos( oh::Reals e_half, oh::LOs& forward_map,
   const oh::LO nvpe = numVertsPerElm;
   // handle ring = 0
   
-  const int Stride = effMajorSize/numVerts;
+  const int Stride = 0;
   const int numTuplesInLastSOA = numVerts - (VectorLength*(numMajorSOA-1));
   Kokkos::Profiling::pushRegion("gyroScatterEFF_ring0_kokkos_region");
 
