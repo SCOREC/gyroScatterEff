@@ -316,8 +316,8 @@ void gyroScatterKokkos( oh::Reals e_half, oh::LOs& forward_map,
   const oh::LO nvpe = numVertsPerElm;
   // handle ring = 0
   
-  const int Stride = 0;
-  const int numTuplesInLastSOA = numVerts - (VectorLength*(numMajorSOA-1));
+  const int Stride = (effMajorSize/numVerts)*VectorLength;
+  int numTuplesInLastSOA = numVerts - (VectorLength*(numMajorSOA-1));
   Kokkos::Profiling::pushRegion("gyroScatterEFF_ring0_kokkos_region");
 
   auto efield_scatter_ring0_kokkos = KOKKOS_LAMBDA( const member_type& thread ) {
@@ -455,6 +455,7 @@ int main(int argc, char** argv) {
     cab::AoSoA<DataTypes, DeviceType, VectorLength> aosoa("packed", numVerts);
     auto eff_major = cab::slice<0>(aosoa);
     auto eff_minor = cab::slice<1>(aosoa);
+    
 
     for(int i=0; i<numIter; i++) {
       gyroScatterCab(e_half, fmap_d, bmap_d,
