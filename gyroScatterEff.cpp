@@ -331,7 +331,6 @@ void gyroScatterKokkos( oh::Reals e_half, oh::LOs& forward_map,
   
   const int Stride = (effMajorSize/numVerts)*VectorLength;
   int numTuplesInLastSOA = numVerts - (VectorLength*(numMajorSOA-1));
-  int teamSizes[2] = {VectorLength, numTuplesInLastSOA};
 
 
   //const Indexor idxr( Stride, VectorLength, gnrp1 );
@@ -340,12 +339,12 @@ void gyroScatterKokkos( oh::Reals e_half, oh::LOs& forward_map,
 
   auto efield_scatter_ring0_kokkos = KOKKOS_LAMBDA( const member_type& thread ) {
     const int s = thread.league_rank();
-    /*
+    
     bool isLastSOA = ( numMajorSOA-1 == s );
     int teamSize = isLastSOA ? numTuplesInLastSOA : VectorLength;
-    */
+    
 
-    Kokkos::parallel_for(Kokkos::TeamThreadRange( thread, teamSizes[numMajorSOA-1 == s] ), 
+    Kokkos::parallel_for(Kokkos::TeamThreadRange( thread, teamSize ), 
     [&] (const int& a) {
       const auto vtx = s*VectorLength+a;
       const oh::LO gyroVtxIdx_f = 2*(vtx*ncomps)+1;
@@ -373,12 +372,12 @@ void gyroScatterKokkos( oh::Reals e_half, oh::LOs& forward_map,
 
   auto efield_scatter_kokkos = KOKKOS_LAMBDA( const member_type& thread ) {
     const int s = thread.league_rank();
-    /*
+    
     bool isLastSOA = ( numMajorSOA-1 == s );
     int teamSize = isLastSOA ? numTuplesInLastSOA : VectorLength;
-    */
+    
 
-    Kokkos::parallel_for( Kokkos::TeamThreadRange( thread, teamSizes[numMajorSOA-1 == s] ), 
+    Kokkos::parallel_for( Kokkos::TeamThreadRange( thread, teamSize ), 
     [&] ( const int& a ) {
         const int vtx = s*VectorLength+a; 
         if (owners[vtx] == mesh_rank) {
