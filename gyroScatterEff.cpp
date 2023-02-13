@@ -301,7 +301,17 @@ gyroScatterKokkos( e_half, fmap_d, bmap_d,
                             owners_d, numMajorSOA, numMinorSOA );
 
 */
-
+struct Indexor {
+  Indexor( const int stride, const int vector_length, const oh::LO  gnrp1 ) : m_stride(stride), m_vector_length(vector_length), m_gnrp1(gnrp1) {}
+  const int m_stride;
+  const int m_vector_length;
+  const int m_gnrp1;
+  // Stride * s + a + VectorLength * (i * gnrp1 + ring)
+  KOKKOS_INLINE_FUNCTION
+  oh::LO operator()( const int s, const int a, int component, int ring ) const {
+    return m_stride * s + a + m_vector_length * ( component * m_gnrp1 + ring );
+  }
+};
 void gyroScatterKokkos( oh::Reals e_half, oh::LOs& forward_map,
                         oh::LOs& backward_map, oh::Reals& forward_weights,
                         oh::Reals& backward_weights, Kokkos::View<double*, MemorySpace>& eff_major,
@@ -309,19 +319,6 @@ void gyroScatterKokkos( oh::Reals e_half, oh::LOs& forward_map,
                         oh::LOs& owners, int numMajorSOA, int numMinorSOA ) 
 {
   typedef typename Kokkos::TeamPolicy<>::member_type member_type;
-  /* 
-  struct Indexor {
-    Indexor( const int stride, const int vector_length, const oh::LO  gnrp1 ) : m_stride(stride), m_vector_length(vector_length), m_gnrp1(gnrp1) {}
-    const int m_stride;
-    const int m_vector_length;
-    const int m_gnrp1;
-    // Stride * s + a + VectorLength * (i * gnrp1 + ring)
-    KOKKOS_INLINE_FUNCTION
-    oh::LO operator()( const int s, const int a, int component, int ring ) const {
-      return m_stride * s + a + m_vector_length * ( component * m_gnrp1 + ring );
-    }
-  };
-  */
   
   const int ncomps = e_half.size() / (2 * numVerts);
   assert(ncomps == numComponents);
@@ -333,7 +330,7 @@ void gyroScatterKokkos( oh::Reals e_half, oh::LOs& forward_map,
   int numTuplesInLastSOA = numVerts - (VectorLength*(numMajorSOA-1));
 
 
-  //const Indexor idxr( Stride, VectorLength, gnrp1 );
+  const Indexor idxr( Stride, VectorLength, gnrp1 );
 
   Kokkos::Profiling::pushRegion("gyroScatterEFF_ring0_kokkos_region");
 
@@ -345,18 +342,18 @@ void gyroScatterKokkos( oh::Reals e_half, oh::LOs& forward_map,
     
 
     Kokkos::parallel_for(Kokkos::TeamThreadRange( thread, teamSize ), 
-    [&] (const int& a) {
+    [=] (const int& a) {
       const auto vtx = s*VectorLength+a;
       const oh::LO gyroVtxIdx_f = 2*(vtx*ncomps)+1;
       const oh::LO gyroVtxIdx_b = 2*(vtx*ncomps);
       for (int i = 0; i < ncomps; ++i) {
-          assert((gyroVtxIdx_f + 2 * i) < ehalfSize);
-          assert((gyroVtxIdx_b + 2 * i) < ehalfSize);
-          //oh::LO loc = idxr(s,a,i,0);
-          oh::LO loc = Stride * s + a + VectorLength * (i * gnrp1);
+        assert((gyroVtxIdx_f + 2 * i) < ehalfSize);
+        assert((gyroVtxIdx_b + 2 * i) < ehalfSize);
+        oh::LO loc = idxr(s,a,i,0);
+        //oh::LO loc = Stride * s + a + VectorLength * (i * gnrp1);
 
-          eff_major(loc) = e_half[gyroVtxIdx_f + 2 * i];
-          eff_minor(loc) = e_half[gyroVtxIdx_b + 2 * i];
+        eff_major(loc) = e_half[gyroVtxIdx_f + 2 * i];
+        eff_minor(loc) = e_half[gyroVtxIdx_b + 2 * i];
       }
     });
   };
@@ -404,8 +401,8 @@ void gyroScatterKokkos( oh::Reals e_half, oh::LOs& forward_map,
                     // access the major component of e_half
                     //TODO: atomic_add probably is not needed here
                     const oh::LO gyroVtxIdx_f = 2 * (mappedVtx_f * ncomps + i) + 1;
-                    //oh::LO loc = idxr(s,a,i,ring);
-                    oh::LO loc = Stride * s + a + VectorLength * (i * gnrp1 + ring);
+                    oh::LO loc = idxr(s,a,i,ring);
+                    //oh::LO loc = Stride * s + a + VectorLength * (i * gnrp1 + ring);
                     Kokkos::atomic_add(&eff_major(loc),
                         mappedWgt_f * e_half[gyroVtxIdx_f] / gppr);
                   }
@@ -415,8 +412,8 @@ void gyroScatterKokkos( oh::Reals e_half, oh::LOs& forward_map,
                     // access the minor component of e_half
                     //TODO: atomic_add probably is not needed here
                     const oh::LO gyroVtxIdx_b = 2 * (mappedVtx_b * ncomps + i);
-                    //oh::LO loc = idxr(s,a,i,ring);
-                    oh::LO loc = Stride * s + a + VectorLength * (i * gnrp1 + ring);
+                    oh::LO loc = idxr(s,a,i,ring);
+                    //oh::LO loc = Stride * s + a + VectorLength * (i * gnrp1 + ring);
                     Kokkos::atomic_add(&eff_minor(loc),
                         mappedWgt_b * e_half[gyroVtxIdx_b] / gppr);
                   }
