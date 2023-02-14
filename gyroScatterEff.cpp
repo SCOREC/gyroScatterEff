@@ -210,7 +210,6 @@ void gyroScatterCab(oh::Reals e_half,
   assert(cudaSuccess==cudaDeviceSynchronize());
 }
 
-
 template<class MeshField, class MeshFieldController>
 void gyroScatterMeshFields(oh::Reals e_half,
     oh::LOs& forward_map, oh::LOs& backward_map,
@@ -293,14 +292,7 @@ void gyroScatterMeshFields(oh::Reals e_half,
   Kokkos::Profiling::popRegion();
   assert(cudaSuccess==cudaDeviceSynchronize());
 }
-/*
-gyroScatterKokkos( e_half, fmap_d, bmap_d,
-                            fweights_d, bweights_d,
-                            eff_major, eff_minor,
-                            numRings, numPtsPerRing,
-                            owners_d, numMajorSOA, numMinorSOA );
 
-*/
 struct Indexor {
   Indexor( const int stride, const int vector_length, const oh::LO  gnrp1 ) : m_stride(stride), m_vector_length(vector_length), m_gnrp1(gnrp1) {}
   const int m_stride;
@@ -325,13 +317,9 @@ void gyroScatterKokkos( oh::Reals e_half, oh::LOs& forward_map,
   int mesh_rank = 0;
   const oh::LO nvpe = numVertsPerElm;
   // handle ring = 0
-  
   const int Stride = (effMajorSize/numVerts)*VectorLength;
   int numTuplesInLastSOA = numVerts - (VectorLength*(numMajorSOA-1));
-
-
   const Indexor idxr( Stride, VectorLength, gnrp1 );
-
   Kokkos::Profiling::pushRegion("gyroScatterEFF_ring0_kokkos_region");
 
   auto efield_scatter_ring0_kokkos = KOKKOS_LAMBDA( const member_type& thread ) {
@@ -342,7 +330,7 @@ void gyroScatterKokkos( oh::Reals e_half, oh::LOs& forward_map,
     
 
     Kokkos::parallel_for(Kokkos::TeamThreadRange( thread, teamSize ), 
-    [=] (const int& a) {
+    [&] (const int& a) {
       const auto vtx = s*VectorLength+a;
       const oh::LO gyroVtxIdx_f = 2*(vtx*ncomps)+1;
       const oh::LO gyroVtxIdx_b = 2*(vtx*ncomps);
@@ -350,7 +338,6 @@ void gyroScatterKokkos( oh::Reals e_half, oh::LOs& forward_map,
         assert((gyroVtxIdx_f + 2 * i) < ehalfSize);
         assert((gyroVtxIdx_b + 2 * i) < ehalfSize);
         oh::LO loc = idxr(s,a,i,0);
-        //oh::LO loc = Stride * s + a + VectorLength * (i * gnrp1);
 
         eff_major(loc) = e_half[gyroVtxIdx_f + 2 * i];
         eff_minor(loc) = e_half[gyroVtxIdx_b + 2 * i];
@@ -402,7 +389,6 @@ void gyroScatterKokkos( oh::Reals e_half, oh::LOs& forward_map,
                     //TODO: atomic_add probably is not needed here
                     const oh::LO gyroVtxIdx_f = 2 * (mappedVtx_f * ncomps + i) + 1;
                     oh::LO loc = idxr(s,a,i,ring);
-                    //oh::LO loc = Stride * s + a + VectorLength * (i * gnrp1 + ring);
                     Kokkos::atomic_add(&eff_major(loc),
                         mappedWgt_f * e_half[gyroVtxIdx_f] / gppr);
                   }
@@ -413,7 +399,6 @@ void gyroScatterKokkos( oh::Reals e_half, oh::LOs& forward_map,
                     //TODO: atomic_add probably is not needed here
                     const oh::LO gyroVtxIdx_b = 2 * (mappedVtx_b * ncomps + i);
                     oh::LO loc = idxr(s,a,i,ring);
-                    //oh::LO loc = Stride * s + a + VectorLength * (i * gnrp1 + ring);
                     Kokkos::atomic_add(&eff_minor(loc),
                         mappedWgt_b * e_half[gyroVtxIdx_b] / gppr);
                   }
@@ -429,7 +414,6 @@ void gyroScatterKokkos( oh::Reals e_half, oh::LOs& forward_map,
   Kokkos::parallel_for("gyroScatterEFF_KokkosView",Kokkos::TeamPolicy<>(numMajorSOA, VectorLength), efield_scatter_kokkos );
   Kokkos::Profiling::popRegion();
 }
-
 
 struct version {
   int major;
@@ -528,13 +512,14 @@ int main(int argc, char** argv) {
     fprintf(stderr, "mode: kokkosView\n");
     /*  Create 2 kokkos views as eff_major and eff_minor
      *  pass into gyroScatterKokkos
-     *  +---------------------------------------------+
-     *  |  Vector01 |
-     *  +---------------+-------------+---------------+
-     *  | vtx01 | vtx02 | vtx03 | vtx04 | vtx05 | vtx06 | ...
-     *  +-------+-------+-------+-------+-------+-------+
-     *  |c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c| ...
-     *  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     *  +-----------------------------------------------+     +-----------+
+     *  | Vector001 | Vector002 | Vector003 | Vector004 | ... | VectorXXX |
+     *  +-----------+-----------+-----------+-----------+     +-------+---+
+     *  | vtx01 | vtx02 | vtx03 | vtx04 | vtx05 | vtx06 | ... | vtxYY |   |
+     *  +-------+-------+-------+-------+-------+-------+     +-------+---+
+     *  |c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c| ... |c|c|c|c|   |
+     *  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+     +-+-+-+-+---+
+     *  
      *   ^ ^
      *   | |__________
      *   |            |
@@ -554,8 +539,6 @@ int main(int argc, char** argv) {
      *
      *  we know that vtx = s*VectorLength+a
      *  and vtx must vary between [0,numVerts)
-     *    
-     * 
      */
     
     constexpr int extent = effMajorSize/numVerts;
@@ -576,8 +559,6 @@ int main(int argc, char** argv) {
                             numRings, numPtsPerRing,
                             owners_d, majorNumSOA, minorNumSOA );
     }
-    
-
   } else {
     fprintf(stderr, "Error: invalid run mode (must be 0, 1, 2, 3, or 4)\n");
     return 0;
