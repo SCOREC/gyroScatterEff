@@ -3,12 +3,10 @@
 #include <Omega_h_for.hpp>
 #include <cstdlib> //exit_failure
 #include <fstream> //std::ifstream
+#include <cmath> //std::floor
 #include "gyroScatterData0.txt" //defines problem size constants
 #include <Cabana_Core.hpp>
 #include <MeshField.hpp>
-
-// TODO:
-#include <cmath> //std::floor
 
 
 namespace oh = Omega_h;
@@ -114,7 +112,6 @@ void gyroScatterOmegah(oh::Reals e_half,
                 // access the minor component of e_half
                 //TODO: atomic_add probably is not needed here
                 const oh::LO gyroVtxIdx_b = 2 * (mappedVtx_b * ncomps + i);
-                // TODO:atomic increment -> sanity check (compare to kokkos version)
                 Kokkos::atomic_add(&(eff_minor[index + i * gnrp1]),
                     mappedWgt_b * e_half[gyroVtxIdx_b] / gppr);
               }
@@ -293,14 +290,7 @@ void gyroScatterMeshFields(oh::Reals e_half,
   Kokkos::Profiling::popRegion();
   assert(cudaSuccess==cudaDeviceSynchronize());
 }
-/*
-gyroScatterKokkos( e_half, fmap_d, bmap_d,
-                            fweights_d, bweights_d,
-                            eff_major, eff_minor,
-                            numRings, numPtsPerRing,
-                            owners_d, numMajorSOA, numMinorSOA );
 
-*/
 struct Indexor {
   Indexor( const int stride, const int vector_length, const oh::LO  gnrp1 ) : m_stride(stride), m_vector_length(vector_length), m_gnrp1(gnrp1) {}
   const int m_stride;
@@ -329,11 +319,11 @@ void gyroScatterKokkos( oh::Reals e_half, oh::LOs& forward_map,
   int numTuplesInLastSOA = numVerts - (VectorLength*(numSOA-1));
   const Indexor idxr( Stride, VectorLength, gnrp1 );
 
-  Kokkos::Profiling::pushRegion("gyroScatterEFF_ring0_kokkos_region");
   // handle ring = 0
+  Kokkos::Profiling::pushRegion("gyroScatterEFF_ring0_kokkos_region");
+
   auto efield_scatter_ring0_kokkos = KOKKOS_LAMBDA( const member_type& thread ) {
     const int s = thread.league_rank();
-    
     bool isLastSOA = ( numSOA-1 == s );
     int teamSize = isLastSOA ? numTuplesInLastSOA : VectorLength;
 
@@ -363,7 +353,6 @@ void gyroScatterKokkos( oh::Reals e_half, oh::LOs& forward_map,
 
   auto efield_scatter_kokkos = KOKKOS_LAMBDA( const member_type& thread ) {
     const int s = thread.league_rank();
-    
     bool isLastSOA = ( numSOA-1 == s );
     int teamSize = isLastSOA ? numTuplesInLastSOA : VectorLength;
 
@@ -521,34 +510,45 @@ int main(int argc, char** argv) {
     fprintf(stderr, "mode: kokkosView\n");
     /*  Create 2 kokkos views as eff_major and eff_minor
      *  pass into gyroScatterKokkos
-     *  +---------------------------------------------+
-     *  |  Vector01 |
-     *  +---------------+-------------+---------------+
-     *  | vtx01 | vtx02 | vtx03 | vtx04 | vtx05 | vtx06 | ...
-     *  +-------+-------+-------+-------+-------+-------+
-     *  |c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c| ...
-     *  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     *   ^ ^
-     *   | |__________
-     *   |            |
-     *  +-----------------------------+
-     *  |Component|Component|Component| ...
-     *  +---------+---------+---------+
-     *  | r0 | r1 | r0 | r1 | r0 | r1 | ...
-     *  +----+----+----+----+----+----+
-     *  
      *
+     *  =Memory layout: (1-D array)=
+     *  +-----------------------------------+-----------------------------------+
+     *  | Vector01                          | Vector02                          |
+     *  +-----------------------------------+-----------------------------------+
+     *  |vtx01|vtx02|vtx03|vtx04|vtx05|vtx06|vtx07|vtx08|vtx09|vtx10|vtx11|vtx12|
+     *  +-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+
+     *  |c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|
+     *  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     *   ^ ^ ^
+     *   | | |___________________________
+     *   | |_____________                |
+     *   |               |               |
+     *   v               v               v
+     *  +-----------------------------------------------+
+     *  |  Component01  |  Component02  |  Component03  | 
+     *  +---------------+---------------+---------------+
+     *  | ring0 | ring1 | ring0 | ring1 | ring0 | ring1 | 
+     *  +-------+-------+-------+-------+-------+-------+
+     *  Notes:
+     *    - vtxs have same number of 'components'and each 
+     *        component has the same number of rings
+     *    - the final vector may not be full if vectorLength
+     *        isn't a multiple of the number of vertices
+     *  
+     * =Logical Layout: (Array of Structs of Arrays)=
+     *
+     *  SoA[numSOA];
+     *
+     *  struct SoA {
+     *    double x[extent][VectorLength];
+     *  };
+     *
+     *  Note: 'extent' is the data size for all fields of a particle.
+     *    -> So if a particle has traits x_position, y_position, z_position,
+     *        then extent would be '3'.
      *
      *  -- fit as many 'extents' inside the vector size.
      *  -- generate appropriate ranges for vector loop variables.
-     *
-     *  cabana: eff_major.access(s,a,i*gnrp1+ring)
-     *  -> eff_major[ (stride * s) + a + (VectorLength * (i*gnrp1+ring)) ];
-     *
-     *  we know that vtx = s*VectorLength+a
-     *  and vtx must vary between [0,numVerts)
-     *    
-     * 
      */
     
     constexpr int extent = effMajorSize/numVerts;
