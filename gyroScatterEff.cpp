@@ -316,7 +316,7 @@ void gyroScatterKokkos( oh::Reals e_half, oh::LOs& forward_map,
                         oh::LOs& backward_map, oh::Reals& forward_weights,
                         oh::Reals& backward_weights, Kokkos::View<double*, MemorySpace>& eff_major,
                         Kokkos::View<double*, MemorySpace>& eff_minor, const oh::LO gnrp1, const oh::LO gppr,
-                        oh::LOs& owners, int numMajorSOA, int numMinorSOA ) 
+                        oh::LOs& owners, int numSOA ) 
 {
   typedef typename Kokkos::TeamPolicy<>::member_type member_type;
   
@@ -324,22 +324,18 @@ void gyroScatterKokkos( oh::Reals e_half, oh::LOs& forward_map,
   assert(ncomps == numComponents);
   int mesh_rank = 0;
   const oh::LO nvpe = numVertsPerElm;
-  // handle ring = 0
   
   const int Stride = (effMajorSize/numVerts)*VectorLength;
-  int numTuplesInLastSOA = numVerts - (VectorLength*(numMajorSOA-1));
-
-
+  int numTuplesInLastSOA = numVerts - (VectorLength*(numSOA-1));
   const Indexor idxr( Stride, VectorLength, gnrp1 );
 
   Kokkos::Profiling::pushRegion("gyroScatterEFF_ring0_kokkos_region");
-
+  // handle ring = 0
   auto efield_scatter_ring0_kokkos = KOKKOS_LAMBDA( const member_type& thread ) {
     const int s = thread.league_rank();
     
-    bool isLastSOA = ( numMajorSOA-1 == s );
+    bool isLastSOA = ( numSOA-1 == s );
     int teamSize = isLastSOA ? numTuplesInLastSOA : VectorLength;
-    
 
     Kokkos::parallel_for(Kokkos::TeamThreadRange( thread, teamSize ), 
     [=] (const int& a) {
@@ -349,16 +345,15 @@ void gyroScatterKokkos( oh::Reals e_half, oh::LOs& forward_map,
       for (int i = 0; i < ncomps; ++i) {
         assert((gyroVtxIdx_f + 2 * i) < ehalfSize);
         assert((gyroVtxIdx_b + 2 * i) < ehalfSize);
+        
         oh::LO loc = idxr(s,a,i,0);
-        //oh::LO loc = Stride * s + a + VectorLength * (i * gnrp1);
-
         eff_major(loc) = e_half[gyroVtxIdx_f + 2 * i];
         eff_minor(loc) = e_half[gyroVtxIdx_b + 2 * i];
       }
     });
   };
 
-  Kokkos::parallel_for("gyroScatterEFF_ring0_KokkosView", Kokkos::TeamPolicy<>(numMajorSOA, VectorLength), efield_scatter_ring0_kokkos );
+  Kokkos::parallel_for("gyroScatterEFF_ring0_KokkosView", Kokkos::TeamPolicy<>(numSOA, VectorLength), efield_scatter_ring0_kokkos );
 
   Kokkos::Profiling::popRegion();
   assert(cudaSuccess==cudaDeviceSynchronize());
@@ -366,13 +361,11 @@ void gyroScatterKokkos( oh::Reals e_half, oh::LOs& forward_map,
   // handle ring > 0
   Kokkos::Profiling::pushRegion("gyroScatterEFF_region");
 
-
   auto efield_scatter_kokkos = KOKKOS_LAMBDA( const member_type& thread ) {
     const int s = thread.league_rank();
     
-    bool isLastSOA = ( numMajorSOA-1 == s );
+    bool isLastSOA = ( numSOA-1 == s );
     int teamSize = isLastSOA ? numTuplesInLastSOA : VectorLength;
-    
 
     Kokkos::parallel_for( Kokkos::TeamThreadRange( thread, teamSize ), 
     [&] ( const int& a ) {
@@ -401,8 +394,8 @@ void gyroScatterKokkos( oh::Reals e_half, oh::LOs& forward_map,
                     // access the major component of e_half
                     //TODO: atomic_add probably is not needed here
                     const oh::LO gyroVtxIdx_f = 2 * (mappedVtx_f * ncomps + i) + 1;
+
                     oh::LO loc = idxr(s,a,i,ring);
-                    //oh::LO loc = Stride * s + a + VectorLength * (i * gnrp1 + ring);
                     Kokkos::atomic_add(&eff_major(loc),
                         mappedWgt_f * e_half[gyroVtxIdx_f] / gppr);
                   }
@@ -412,8 +405,8 @@ void gyroScatterKokkos( oh::Reals e_half, oh::LOs& forward_map,
                     // access the minor component of e_half
                     //TODO: atomic_add probably is not needed here
                     const oh::LO gyroVtxIdx_b = 2 * (mappedVtx_b * ncomps + i);
+
                     oh::LO loc = idxr(s,a,i,ring);
-                    //oh::LO loc = Stride * s + a + VectorLength * (i * gnrp1 + ring);
                     Kokkos::atomic_add(&eff_minor(loc),
                         mappedWgt_b * e_half[gyroVtxIdx_b] / gppr);
                   }
@@ -426,7 +419,7 @@ void gyroScatterKokkos( oh::Reals e_half, oh::LOs& forward_map,
     });
   };
   
-  Kokkos::parallel_for("gyroScatterEFF_KokkosView",Kokkos::TeamPolicy<>(numMajorSOA, VectorLength), efield_scatter_kokkos );
+  Kokkos::parallel_for("gyroScatterEFF_KokkosView",Kokkos::TeamPolicy<>(numSOA, VectorLength), efield_scatter_kokkos );
   Kokkos::Profiling::popRegion();
 }
 
@@ -559,14 +552,12 @@ int main(int argc, char** argv) {
      */
     
     constexpr int extent = effMajorSize/numVerts;
-    auto majorNumSOA = std::floor( numVerts/VectorLength );
-    auto minorNumSOA = std::floor( numVerts/VectorLength );
+    auto numSOA = std::floor( numVerts/VectorLength );
 
-    if( effMajorSize % VectorLength > 0 ) majorNumSOA++;
-    if( effMinorSize % VectorLength > 0 ) minorNumSOA++;
+    if( effMajorSize % VectorLength > 0 ) numSOA++;
     
-    Kokkos::View<double*, MemorySpace> eff_major( "eff_major", majorNumSOA*extent*VectorLength );
-    Kokkos::View<double*, MemorySpace> eff_minor( "eff_major", minorNumSOA*extent*VectorLength );
+    Kokkos::View<double*, MemorySpace> eff_major( "eff_major", numSOA*extent*VectorLength );
+    Kokkos::View<double*, MemorySpace> eff_minor( "eff_major", numSOA*extent*VectorLength );
       
     for( int i = 0; i < numIter; i++ )
     {
@@ -574,7 +565,7 @@ int main(int argc, char** argv) {
                             fweights_d, bweights_d,
                             eff_major, eff_minor,
                             numRings, numPtsPerRing,
-                            owners_d, majorNumSOA, minorNumSOA );
+                            owners_d, numSOA );
     }
     
 
